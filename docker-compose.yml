@@ -1,0 +1,48 @@
+services:
+  smol-vlm:
+    build: .
+    container_name: vlm_smol
+    privileged: true
+    devices:
+      - "/dev/kfd:/dev/kfd"
+      - "/dev/dri:/dev/dri"
+      - "/dev/video0:/dev/video0"
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+    volumes:
+      - ./scripts:/app/scripts
+      - ./entrypoint.sh:/app/entrypoint.sh
+    # Pass the specific script name as an argument
+    entrypoint: ["/bin/bash", "/app/entrypoint.sh", "smol_vlm_app.py"]
+
+  moondream:
+    build: .
+    container_name: vlm_moondream
+    privileged: true
+    devices:
+      - "/dev/kfd:/dev/kfd"
+      - "/dev/dri:/dev/dri"
+      - "/dev/video0:/dev/video0"
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+    volumes:
+      - ./scripts:/app/scripts
+      - ./entrypoint.sh:/app/entrypoint.sh
+    entrypoint: ["/bin/bash", "/app/entrypoint.sh", "moondream_app.py"]
+
+# --- Variant 3: Qwen2-VL (The Smartest) ---
+  qwen-vl:
+    build: .
+    container_name: vlm_qwen
+    privileged: true
+    devices:
+      - "/dev/kfd:/dev/kfd"
+      - "/dev/dri:/dev/dri"
+      - "/dev/video0:/dev/video0"
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - MODEL_ID=Qwen/Qwen2-VL-2B-Instruct
+    volumes:
+      - ./scripts:/app/scripts
+      - ./entrypoint.sh:/app/entrypoint.sh
+    entrypoint: ["/bin/bash", "/app/entrypoint.sh", "qwen_vlm_app.py"]
