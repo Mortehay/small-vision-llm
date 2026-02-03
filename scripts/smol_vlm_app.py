@@ -1,11 +1,12 @@
-import cv2
 import torch
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForImageTextToText
+from helpers import connect_camera, camera_src
+
 
 # Configuration
 MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu" if torch.cuda.is_available() else "cpu"
 
 print(f"Loading SmolVLM2 on {DEVICE}...")
 processor = AutoProcessor.from_pretrained(MODEL_ID)
@@ -15,7 +16,11 @@ model = AutoModelForImageTextToText.from_pretrained(
     _attn_implementation="eager" # AMD iGPU friendly
 ).to(DEVICE)
 
-cap = cv2.VideoCapture(0)
+cap = connect_camera()
+
+if not cap.isOpened():
+    print(f"Cannot open source: {camera_src}")
+    exit(1)
 
 while cap.isOpened():
     ret, frame = cap.read()

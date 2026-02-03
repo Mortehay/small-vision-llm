@@ -1,48 +1,73 @@
+volumes:
+  hf_models:
 services:
   smol-vlm:
-    build: .
+    build:
+      context: .
+      dockerfile: configs/smol-vlm/Dockerfile
     container_name: vlm_smol
-    privileged: true
-    devices:
-      - "/dev/kfd:/dev/kfd"
-      - "/dev/dri:/dev/dri"
-      - "/dev/video0:/dev/video0"
+    user: root
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - CAMERA_URL=udp://host.docker.internal:55080
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - MODEL_ID=HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+      - HF_DATASETS_OFFLINE=1
     volumes:
+      - /dev:/dev
       - ./scripts:/app/scripts
       - ./entrypoint.sh:/app/entrypoint.sh
+      - ./models:/root/.cache/huggingface
     # Pass the specific script name as an argument
     entrypoint: ["/bin/bash", "/app/entrypoint.sh", "smol_vlm_app.py"]
 
   moondream:
-    build: .
+    build:
+      context: .
+      dockerfile: configs/moondream/Dockerfile
     container_name: vlm_moondream
-    privileged: true
-    devices:
-      - "/dev/kfd:/dev/kfd"
-      - "/dev/dri:/dev/dri"
-      - "/dev/video0:/dev/video0"
+    user: root
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - CAMERA_URL=udp://host.docker.internal:55080
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - MODEL_ID=vikhyatk/moondream2
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+      - HF_DATASETS_OFFLINE=1
     volumes:
+      - /dev:/dev
       - ./scripts:/app/scripts
       - ./entrypoint.sh:/app/entrypoint.sh
+      - ./models:/root/.cache/huggingface
     entrypoint: ["/bin/bash", "/app/entrypoint.sh", "moondream_app.py"]
 
 # --- Variant 3: Qwen2-VL (The Smartest) ---
   qwen-vl:
-    build: .
+    build:
+      context: .
+      dockerfile: configs/qwen-vl/Dockerfile
     container_name: vlm_qwen
-    privileged: true
-    devices:
-      - "/dev/kfd:/dev/kfd"
-      - "/dev/dri:/dev/dri"
-      - "/dev/video0:/dev/video0"
+    user: root
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - CAMERA_URL=udp://host.docker.internal:55080
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
       - MODEL_ID=Qwen/Qwen2-VL-2B-Instruct
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+      - HF_DATASETS_OFFLINE=1
     volumes:
+      - /dev:/dev
       - ./scripts:/app/scripts
       - ./entrypoint.sh:/app/entrypoint.sh
+      - ./models:/root/.cache/huggingface
     entrypoint: ["/bin/bash", "/app/entrypoint.sh", "qwen_vlm_app.py"]

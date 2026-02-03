@@ -1,12 +1,15 @@
-import cv2
+
+from helpers import connect_camera, camera_src
 from PIL import Image
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
+
 MODEL_ID = "vikhyatk/moondream2"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DEVICE = "cpu" if torch.cuda.is_available() else "cpu"
 
 print(f"Loading Moondream2 on {DEVICE}...")
+processor = AutoProcessor.from_pretrained(MODEL_ID)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, 
     trust_remote_code=True,
@@ -14,7 +17,11 @@ model = AutoModelForCausalLM.from_pretrained(
 ).to(DEVICE)
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
-cap = cv2.VideoCapture(0)
+cap = connect_camera()
+
+if not cap.isOpened():
+    print(f"Cannot open source: {camera_src}")
+    exit(1)
 
 while cap.isOpened():
     ret, frame = cap.read()
