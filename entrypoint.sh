@@ -54,26 +54,26 @@ fi
 # 2. Execution / Pending Loop
 # Execution loop
 # 2. Execution / Pending Loop
-while true; do
-    if [ -f "/app/scripts/$SCRIPT_NAME" ]; then
-        echo "LOG: [$(date)] Checking for UDP traffic on port 55080..."
+# while true; do
+#     if [ -f "/app/scripts/$SCRIPT_NAME" ]; then
+#         echo "LOG: [$(date)] Checking for UDP traffic on port 55080..."
         
-        # Use timeout with cat on the udp device - this is a bash-native way to check UDP
-        # We try to read 1 byte. If it succeeds, traffic is present.
-        if timeout 2s bash -c "exec 3<>/dev/udp/host.docker.internal/55080; cat <&3" > /dev/null 2>&1; then
-             echo "LOG: [$(date)] Stream active. Starting $SCRIPT_NAME..."
-             python3 "/app/scripts/$SCRIPT_NAME"
-             sleep $SLEEP_TIME
-        else
-            # Fallback: if 'nc' worked for you manually, use it here
-            if nc -zu -w 2 host.docker.internal 55080; then
-                echo "LOG: [$(date)] Port 55080 is reachable. Starting $SCRIPT_NAME..."
-                python3 "/app/scripts/$SCRIPT_NAME"
-                sleep $SLEEP_TIME
-            else
-                echo "IDLE: No camera data. Waiting..."
-                sleep 10
-            fi
-        fi
-    fi
-done
+#         # Use timeout with cat on the udp device - this is a bash-native way to check UDP
+#         # We try to read 1 byte. If it succeeds, traffic is present.
+#         if timeout 2s bash -c "exec 3<>/dev/udp/host.docker.internal/55080; cat <&3" > /dev/null 2>&1; then
+#              echo "LOG: [$(date)] Stream active. Starting $SCRIPT_NAME..."
+#              python3 "/app/scripts/$SCRIPT_NAME"
+#              sleep $SLEEP_TIME
+#         else
+#             # Fallback: if 'nc' worked for you manually, use it here
+#             if nc -zu -w 2 host.docker.internal 55080; then
+#                 echo "LOG: [$(date)] Port 55080 is reachable. Starting $SCRIPT_NAME..."
+#                 python3 "/app/scripts/$SCRIPT_NAME"
+#                 sleep $SLEEP_TIME
+#             else
+#                 echo "IDLE: No camera data. Waiting..."
+#                 sleep 10
+#             fi
+#         fi
+#     fi
+# done

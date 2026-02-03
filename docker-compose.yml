@@ -23,7 +23,7 @@ services:
       - ./entrypoint.sh:/app/entrypoint.sh
       - ./models:/root/.cache/huggingface
     # Pass the specific script name as an argument
-    entrypoint: ["/bin/bash", "/app/entrypoint.sh", "smol_vlm_app.py"]
+    entrypoint: ["tail", "-f", "/dev/null"]
 
   moondream:
     build:
@@ -46,7 +46,7 @@ services:
       - ./scripts:/app/scripts
       - ./entrypoint.sh:/app/entrypoint.sh
       - ./models:/root/.cache/huggingface
-    entrypoint: ["/bin/bash", "/app/entrypoint.sh", "moondream_app.py"]
+    entrypoint: ["tail", "-f", "/dev/null"]
 
 # --- Variant 3: Qwen2-VL (The Smartest) ---
   qwen-vl:
@@ -70,4 +70,4 @@ services:
       - ./scripts:/app/scripts
       - ./entrypoint.sh:/app/entrypoint.sh
       - ./models:/root/.cache/huggingface
-    entrypoint: ["/bin/bash", "/app/entrypoint.sh", "qwen_vlm_app.py"]
+    entrypoint: ["tail", "-f", "/dev/null"]

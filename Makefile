@@ -94,3 +94,12 @@ stream-cam:
 # Use this to check if the container can actually "see" the host
 test-net:
 	docker exec -it vlm_smol ping -c 3 host.docker.internal
+
+# Open an interactive shell in a container
+# Usage: make shell name=vlm_smol
+shell:
+	@if [ -z "$(name)" ]; then \
+		echo "Error: Specify container name, e.g., 'make shell name=vlm_smol'"; \
+	else \
+		docker exec -it $(name) /bin/bash; \
+	fi
