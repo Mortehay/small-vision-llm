@@ -20,6 +20,14 @@ else
     echo "WARNING: No camera source found."
 fi
 
+if [ -e "/dev/video0" ]; then
+    echo "LOG: Hardware check successful. /dev/video0 is accessible."
+    # Ensure root has full access regardless of group
+    chmod 666 /dev/video0 2>/dev/null || true
+else
+    echo "ERROR: /dev/video0 still missing after cgroup punch-through!"
+fi
+
 # Skip the download logic entirely if the directory exists
 if [ -d "$MODEL_CACHE_DIR" ]; then
     echo "LOG: [$(date)] Model $MODEL_ID found. Skipping network check."

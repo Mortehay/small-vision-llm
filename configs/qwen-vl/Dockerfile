@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     git \
     tcpdump \
     netcat-openbsd \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install CPU-specific PyTorch (much smaller for your Ryzen 5)

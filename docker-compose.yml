@@ -1,17 +1,39 @@
 volumes:
   hf_models:
 services:
+  stream-cam:
+    container_name: stream-cam
+    image: jrottenberg/ffmpeg
+    network_mode: "host" 
+    user: root
+    privileged: true 
+    volumes:
+      - /dev:/dev
+    entrypoint: >
+      ffmpeg -fflags nobuffer -flags low_delay
+      -f v4l2 -framerate 10 -video_size 1280x720 -i /dev/video0
+      -vcodec libx264 -preset ultrafast -tune zerolatency
+      -x264-params repeat-headers=1:keyint=10
+      -f mpegts "udp://127.0.0.1:55080?pkt_size=1316"
+
+
   smol-vlm:
     build:
       context: .
       dockerfile: configs/smol-vlm/Dockerfile
     container_name: vlm_smol
     user: root
+    network_mode: "host"
+    deploy:
+      resources:
+        limits:
+          cpus: '8.0'      # Use 8 cores (if available)
+          memory: 8G       # Give it 8GB of RAM
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - HF_TOKEN=${HF_TOKEN}
-      - CAMERA_URL=udp://host.docker.internal:55080
+      - CAMERA_URL=udp://host.docker.internal:55080?pkt_size=1316
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
       - MODEL_ID=HuggingFaceTB/SmolVLM2-500M-Video-Instruct
       - HF_HUB_OFFLINE=1
@@ -20,54 +42,55 @@ services:
     volumes:
       - /dev:/dev
       - ./scripts:/app/scripts
+      - ./logs:/app/logs
       - ./entrypoint.sh:/app/entrypoint.sh
       - ./models:/root/.cache/huggingface
     # Pass the specific script name as an argument
     entrypoint: ["tail", "-f", "/dev/null"]
 
-  moondream:
-    build:
-      context: .
-      dockerfile: configs/moondream/Dockerfile
-    container_name: vlm_moondream
-    user: root
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - CAMERA_URL=udp://host.docker.internal:55080
-      - HSA_OVERRIDE_GFX_VERSION=10.3.0
-      - MODEL_ID=vikhyatk/moondream2
-      - HF_HUB_OFFLINE=1
-      - TRANSFORMERS_OFFLINE=1
-      - HF_DATASETS_OFFLINE=1
-    volumes:
-      - /dev:/dev
-      - ./scripts:/app/scripts
-      - ./entrypoint.sh:/app/entrypoint.sh
-      - ./models:/root/.cache/huggingface
-    entrypoint: ["tail", "-f", "/dev/null"]
+  # moondream:
+  #   build:
+  #     context: .
+  #     dockerfile: configs/moondream/Dockerfile
+  #   container_name: vlm_moondream
+  #   user: root
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   environment:
+  #     - HF_TOKEN=${HF_TOKEN}
+  #     - CAMERA_URL=udp://host.docker.internal:55080
+  #     - HSA_OVERRIDE_GFX_VERSION=10.3.0
+  #     - MODEL_ID=vikhyatk/moondream2
+  #     - HF_HUB_OFFLINE=1
+  #     - TRANSFORMERS_OFFLINE=1
+  #     - HF_DATASETS_OFFLINE=1
+  #   volumes:
+  #     - /dev:/dev
+  #     - ./scripts:/app/scripts
+  #     - ./entrypoint.sh:/app/entrypoint.sh
+  #     - ./models:/root/.cache/huggingface
+  #   entrypoint: ["tail", "-f", "/dev/null"]
 
 # --- Variant 3: Qwen2-VL (The Smartest) ---
-  qwen-vl:
-    build:
-      context: .
-      dockerfile: configs/qwen-vl/Dockerfile
-    container_name: vlm_qwen
-    user: root
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - CAMERA_URL=udp://host.docker.internal:55080
-      - HSA_OVERRIDE_GFX_VERSION=10.3.0
-      - MODEL_ID=Qwen/Qwen2-VL-2B-Instruct
-      - HF_HUB_OFFLINE=1
-      - TRANSFORMERS_OFFLINE=1
-      - HF_DATASETS_OFFLINE=1
-    volumes:
-      - /dev:/dev
-      - ./scripts:/app/scripts
-      - ./entrypoint.sh:/app/entrypoint.sh
-      - ./models:/root/.cache/huggingface
-    entrypoint: ["tail", "-f", "/dev/null"]
+  # qwen-vl:
+  #   build:
+  #     context: .
+  #     dockerfile: configs/qwen-vl/Dockerfile
+  #   container_name: vlm_qwen
+  #   user: root
+  #   extra_hosts:
+  #     - "host.docker.internal:host-gateway"
+  #   environment:
+  #     - HF_TOKEN=${HF_TOKEN}
+  #     - CAMERA_URL=udp://host.docker.internal:55080
+  #     - HSA_OVERRIDE_GFX_VERSION=10.3.0
+  #     - MODEL_ID=Qwen/Qwen2-VL-2B-Instruct
+  #     - HF_HUB_OFFLINE=1
+  #     - TRANSFORMERS_OFFLINE=1
+  #     - HF_DATASETS_OFFLINE=1
+  #   volumes:
+  #     - /dev:/dev
+  #     - ./scripts:/app/scripts
+  #     - ./entrypoint.sh:/app/entrypoint.sh
+  #     - ./models:/root/.cache/huggingface
+  #   entrypoint: ["tail", "-f", "/dev/null"]

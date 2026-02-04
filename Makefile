@@ -4,6 +4,7 @@ COMPOSE=docker compose
 # Camera Streaming
 CAMERA_URL=http://127.0.0.1:55080?listen=1
 
+
 .PHONY: build up stop force-retry update-llm
 
 build:
@@ -84,12 +85,19 @@ check-cam:
 #            -vcodec libx264 -preset ultrafast -tune zerolatency \
 #            -x264-params repeat-headers=1:keyint=10 \
 #            -f mpegts "udp://192.168.65.2:55080?pkt_size=1316&buffer_size=65535"
+# stream-cam:
+# 	ffmpeg -fflags nobuffer -flags low_delay \
+#            -f v4l2 -framerate 10 -video_size 1280x720 -i /dev/video0 \
+#            -vcodec libx264 -preset ultrafast -tune zerolatency \
+#            -x264-params repeat-headers=1:keyint=10 \
+#            -f mpegts "udp://172.17.0.1:55080?pkt_size=1316"
+
 stream-cam:
-	ffmpeg -fflags nobuffer -flags low_delay \
+	docker exec -it stream-cam ffmpeg -fflags nobuffer -flags low_delay \
            -f v4l2 -framerate 10 -video_size 1280x720 -i /dev/video0 \
            -vcodec libx264 -preset ultrafast -tune zerolatency \
            -x264-params repeat-headers=1:keyint=10 \
-           -f mpegts "udp://172.17.0.1:55080?pkt_size=1316"
+           -f mpegts "udp://192.168.65.2:55080?pkt_size=1316&buffer_size=65535"
 
 # Use this to check if the container can actually "see" the host
 test-net:
