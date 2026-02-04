@@ -20,27 +20,19 @@ torch.set_num_threads(8)
 torch.set_num_interop_threads(8)
 
 # --- 1. DIRECTORY & LOGGING SETUP ---
-log_dir = "/app/logs"
+log_dir = '/app/logs'
+# Force the directory to exist inside the container's view
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir, exist_ok=True)
+
 current_date = datetime.now().strftime("%Y_%m_%d")
 log_path = os.path.join(log_dir, f"smol_vlm_app_{current_date}.log")
 
-# Print for debugging - you will see this in 'docker logs'
-print(f"DEBUG: Current Working Directory is: {os.getcwd()}")
-print(f"DEBUG: Attempting to create/check log directory: {log_dir}")
-
-try:
-    os.makedirs(log_dir, exist_ok=True)
-    print("DEBUG: Directory is ready.")
-except Exception as e:
-    print(f"DEBUG: Failed to create directory: {e}")
-
+# This will now succeed because we forced the directory creation above
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_path), 
-        logging.StreamHandler()
-    ]
+    handlers=[logging.FileHandler(log_path), logging.StreamHandler()]
 )
 logger = logging.getLogger("SmolVLM")
 
@@ -56,12 +48,32 @@ model = AutoModelForImageTextToText.from_pretrained(
     _attn_implementation="eager"
 ).to(DEVICE)
 
+FRAME_RESOLUTION = os.getenv("FRAME_RESOLUTION", "640x480")
+FRAME_RESOLUTION_CROPED = os.getenv("FRAME_RESOLUTION_CROPED", "480x360")
+
 # --- 3. CAMERA & PIPE SETUP ---
 cap = connect_camera()
+# Get the actual dimensions from the camera to ensure FFmpeg matches
+ret, first_frame = cap.read()
+if not ret:
+    raise Exception("Could not read initial frame from camera")
+h, w, _ = first_frame.shape
+actual_res = f"{w}x{h}"
+
 out_stream_cmd = [
-    'ffmpeg', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24',
-    '-s', '1280x720', '-r', '10', '-i', '-', '-c:v', 'libx264',
-    '-preset', 'ultrafast', '-tune', 'zerolatency', '-f', 'mpegts',
+    'ffmpeg', 
+    '-y',
+    '-f', 'rawvideo', 
+    '-vcodec', 'rawvideo', 
+    '-pix_fmt', 'bgr24',       # OpenCV default
+    '-s', actual_res,          # MUST match the frame.tobytes() size
+    '-r', '10', 
+    '-i', '-', 
+    '-c:v', 'libx264',
+    '-pix_fmt', 'yuv420p',     # Standard for video players
+    '-preset', 'ultrafast', 
+    '-tune', 'zerolatency', 
+    '-f', 'mpegts',
     'udp://127.0.0.1:55081?pkt_size=1316'
 ]
 out_pipe = subprocess.Popen(out_stream_cmd, stdin=subprocess.PIPE)
@@ -119,9 +131,14 @@ threading.Thread(target=ai_worker, daemon=True).start()
 
 # --- 6. MAIN LOOP (THE "STREAMER") ---
 frame_count = 0
+# Define desired output resolution explicitly to match FFmpeg -s
+out_w, out_h = 480, 360
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret: break
+    # FORCE RESIZE to match the FFmpeg pipe resolution
+    # This prevents the horizontal "shifted" stripes
+    frame = cv2.resize(frame, (out_w, out_h))
 
     frame_count += 1
 
@@ -141,6 +158,7 @@ while cap.isOpened():
     cv2.rectangle(frame, (10, 10), (w-10, 60), (0,0,0), -1)
     cv2.putText(frame, f"AI: {last_ai_text}", (20, 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
 
+    # Write the correctly sized frame to the pipe
     out_pipe.stdin.write(frame.tobytes())
 
 cap.release()

@@ -92,6 +92,10 @@ check-cam:
 #            -x264-params repeat-headers=1:keyint=10 \
 #            -f mpegts "udp://172.17.0.1:55080?pkt_size=1316"
 
+reset-cam:
+	sudo modprobe -r uvcvideo
+	sudo modprobe uvcvideo
+
 stream-cam:
 	docker exec -it stream-cam ffmpeg -fflags nobuffer -flags low_delay \
            -f v4l2 -framerate 10 -video_size 1280x720 -i /dev/video0 \

@@ -2,7 +2,7 @@ import cv2
 import time
 import os
 
-camera_src = "udp://172.17.0.1:55080"
+camera_src = os.getenv("CAMERA_URL", "udp://127.0.0.1:55080?pkt_size=1316")
 
 def connect_camera():
     # Use the Docker internal DNS name which resolves to your host bridge
