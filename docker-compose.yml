@@ -22,32 +22,76 @@ services:
       -bsf:v "dump_extra=freq=keyframe" 
       -f mpegts "udp://127.0.0.1:55080?pkt_size=1316"
 
+  # --- SmolVLM API (Fastest for CPU) ---
+  vlm-smol-api:
+    image: ghcr.io/huggingface/text-generation-inference:latest
+    container_name: vlm_smol_api
+    volumes:
+      - ./models:/data  # TGI expects models in /data
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - CUDA_VISIBLE_DEVICES=""
+      - VLLM_TARGET_DEVICE=openvino
+    ports:
+      - "48000:80"
+    command: >
+      --model-id HuggingFaceTB/SmolVLM2-500M-Video-Instruct
+      --max-total-tokens 1024
+      --trust-remote-code
 
+  # --- Moondream API (TGI CPU) ---
+  vlm-moon-api:
+    image: ghcr.io/huggingface/text-generation-inference:latest
+    container_name: vlm_moon_api
+    volumes:
+      - ./models:/data
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - CUDA_VISIBLE_DEVICES=""
+      - VLLM_TARGET_DEVICE=openvino
+    ports:
+      - "48001:80"
+    command: >
+      --model-id vikhyatk/moondream2
+      --max-total-tokens 1024
+      --trust-remote-code
 
-  smol-vlm:
+  # --- Qwen2-VL API (TGI CPU) ---
+  vlm-qwen-api:
+    image: ghcr.io/huggingface/text-generation-inference:latest
+    container_name: vlm_qwen_api
+    volumes:
+      - ./models:/data
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - CUDA_VISIBLE_DEVICES=""
+      - VLLM_TARGET_DEVICE=openvino
+    ports:
+      - "48002:80"
+    command: >
+      --model-id Qwen/Qwen2-VL-2B-Instruct
+      --max-total-tokens 1024
+      --trust-remote-code
+
+  stream-operations:
     build:
       context: .
-      dockerfile: configs/smol-vlm/Dockerfile
-    container_name: vlm_smol
+      dockerfile: configs/stream-operations/Dockerfile
+    container_name: stream_operations
     user: root
     network_mode: "host"
-    deploy:
-      resources:
-        limits:
-          cpus: '8.0'      # Use 8 cores (if available)
-          memory: 8G       # Give it 8GB of RAM
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
       - HF_TOKEN=${HF_TOKEN}
-      - CAMERA_URL=udp://127.0.0.1:55080?pkt_size=1316
+      - CAMERA_URL=${CAMERA_URL}
       - FRAME_RESOLUTION=${FRAME_RESOLUTION}
       - FRAME_RESOLUTION_CROPED=${FRAME_RESOLUTION_CROPED}
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
-      - MODEL_ID=HuggingFaceTB/SmolVLM2-500M-Video-Instruct
-      - HF_HUB_OFFLINE=1
-      - TRANSFORMERS_OFFLINE=1
-      - HF_DATASETS_OFFLINE=1
+      - SMOL_API_URL=http://127.0.0.1:48000/v1/chat/completions
+      - MOON_API_URL=http://127.0.0.1:48001/v1/chat/completions
+      - QWEN_API_URL=http://127.0.0.1:48002/v1/chat/completions
+
     volumes:
       - /dev:/dev
       - ./scripts:/app/scripts
@@ -57,49 +101,3 @@ services:
     # Pass the specific script name as an argument
     entrypoint: ["tail", "-f", "/dev/null"]
 
-  # moondream:
-  #   build:
-  #     context: .
-  #     dockerfile: configs/moondream/Dockerfile
-  #   container_name: vlm_moondream
-  #   user: root
-  #   extra_hosts:
-  #     - "host.docker.internal:host-gateway"
-  #   environment:
-  #     - HF_TOKEN=${HF_TOKEN}
-  #     - CAMERA_URL=udp://host.docker.internal:55080
-  #     - HSA_OVERRIDE_GFX_VERSION=10.3.0
-  #     - MODEL_ID=vikhyatk/moondream2
-  #     - HF_HUB_OFFLINE=1
-  #     - TRANSFORMERS_OFFLINE=1
-  #     - HF_DATASETS_OFFLINE=1
-  #   volumes:
-  #     - /dev:/dev
-  #     - ./scripts:/app/scripts
-  #     - ./entrypoint.sh:/app/entrypoint.sh
-  #     - ./models:/root/.cache/huggingface
-  #   entrypoint: ["tail", "-f", "/dev/null"]
-
-# --- Variant 3: Qwen2-VL (The Smartest) ---
-  # qwen-vl:
-  #   build:
-  #     context: .
-  #     dockerfile: configs/qwen-vl/Dockerfile
-  #   container_name: vlm_qwen
-  #   user: root
-  #   extra_hosts:
-  #     - "host.docker.internal:host-gateway"
-  #   environment:
-  #     - HF_TOKEN=${HF_TOKEN}
-  #     - CAMERA_URL=udp://host.docker.internal:55080
-  #     - HSA_OVERRIDE_GFX_VERSION=10.3.0
-  #     - MODEL_ID=Qwen/Qwen2-VL-2B-Instruct
-  #     - HF_HUB_OFFLINE=1
-  #     - TRANSFORMERS_OFFLINE=1
-  #     - HF_DATASETS_OFFLINE=1
-  #   volumes:
-  #     - /dev:/dev
-  #     - ./scripts:/app/scripts
-  #     - ./entrypoint.sh:/app/entrypoint.sh
-  #     - ./models:/root/.cache/huggingface
-  #   entrypoint: ["tail", "-f", "/dev/null"]
