@@ -10,8 +10,8 @@ import re
 from helpers import connect_camera
 
 # --- 1. CONFIGURATION FROM DOCKER-COMPOSE ---
-API_URL = os.getenv("SMOL_API_URL", "http://127.0.0.1:48000/v1/chat/completions")
-MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+API_URL = "http://ollama-llm:11434/api/chat" 
+MODEL_ID = "hf.co/JoseferEins/SmolVLM-500M-Instruct-fer0:latest"
 
 # --- 2. CAMERA SETUP ---
 cap = connect_camera()
@@ -52,17 +52,16 @@ def ai_worker():
                     "model": MODEL_ID,
                     "messages": [{
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Detect humans and return bounding boxes."},
-                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                        ]
+                        "content": "Detect humans and return bounding boxes.",
+                        "images": [img_b64] # Correct format for Ollama 
                     }],
-                    "max_tokens": 50
+                    "stream": False
                 }
-                
-                response = requests.post(API_URL, json=payload, timeout=5)
+                                
+                # Increase timeout for CPU-only processing
+                response = requests.post(API_URL, json=payload, timeout=60)
                 result = response.json()
-                last_ai_text = result['choices'][0]['message']['content']
+                last_ai_text = result['message']['content']
 
                 # Use your existing regex to find [ymin, xmin, ymax, xmax] 
                 coords = re.findall(r"(\d+)", last_ai_text)

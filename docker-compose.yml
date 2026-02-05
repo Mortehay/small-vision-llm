@@ -1,12 +1,85 @@
-volumes:
-  hf_models:
+networks:
+  local-ai-net: {}
+  shared-ai-network:
+    external: true
 services:
+  ollama-llm:
+    image: ollama/ollama:latest
+    container_name: ollama-llm
+    environment:
+      - OLLAMA_VULKAN=1
+      - HF_TOKEN=${HF_TOKEN}
+    privileged: true
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri/renderD128:/dev/dri/renderD128
+      - /dev/dri/card1:/dev/dri/card1
+    security_opt:
+      - seccomp=unconfined
+    group_add:
+      - "${RENDER_GID:-992}"
+      - "${VIDEO_GID:-44}"
+    networks:
+      shared-ai-network:
+        aliases:
+          - ollama.loc
+      local-ai-net:
+        aliases:
+          - ollama.loc
+    ports:
+      - "11435:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    restart: unless-stopped
+
+  # --- Automated Model Downloader ---
+  ollama-llm-pull-models:
+    image: ollama/ollama:latest
+    container_name: ollama-setup
+    volumes:
+      - ./ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=ollama:11434
+      - HF_TOKEN=${HF_TOKEN}
+    entrypoint: /bin/sh
+    command: >
+      -c "sleep 10;
+      for model in ${LLM_LIST}; do
+        if ! ollama list | grep -q \"$$model\"; then
+          echo \"Model $$model not found, pulling...\";
+          ollama pull $$model;
+        else
+          echo \"Model $$model already exists. Skipping.\";
+        fi;
+      done"
+    depends_on:
+      - ollama-llm
+    restart: on-failure
+
+  
+  # --- Web Interface ---
+  open-webui-llm:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui-llm
+    ports:
+      - "11090:8080"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+    volumes:
+      - ./webui_data:/app/backend/data
+    restart: unless-stopped
+    
+  # --- Camera Streamer ---
   stream-cam:
     container_name: stream-cam
     image: jrottenberg/ffmpeg
-    network_mode: "host" 
     user: root
     privileged: true 
+    networks:
+      - local-ai-net
+      - shared-ai-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - /dev:/dev
     devices:
@@ -14,64 +87,11 @@ services:
     environment:
       - FRAME_RESOLUTION=${FRAME_RESOLUTION}
       - FRAME_RESOLUTION_CROP=${FRAME_RESOLUTION_CROP}
+      - CAMERA_URL=${CAMERA_URL}
     entrypoint: >
-      ffmpeg -f v4l2 -input_format mjpeg -framerate 30 -video_size ${FRAME_RESOLUTION} -i /dev/video0 
-      -vf "crop=${FRAME_RESOLUTION_CROP}"
-      -vcodec libx264 -pix_fmt yuv420p -preset ultrafast -tune zerolatency 
-      -x264-params "repeat-headers=1:keyint=15" 
-      -bsf:v "dump_extra=freq=keyframe" 
-      -f mpegts "udp://127.0.0.1:55080?pkt_size=1316"
-
-  # --- SmolVLM API (Fastest for CPU) ---
-  vlm-smol-api:
-    image: ghcr.io/huggingface/text-generation-inference:latest
-    container_name: vlm_smol_api
-    volumes:
-      - ./models:/data  # TGI expects models in /data
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - CUDA_VISIBLE_DEVICES=""
-      - VLLM_TARGET_DEVICE=openvino
-    ports:
-      - "48000:80"
-    command: >
-      --model-id HuggingFaceTB/SmolVLM2-500M-Video-Instruct
-      --max-total-tokens 1024
-      --trust-remote-code
-
-  # --- Moondream API (TGI CPU) ---
-  vlm-moon-api:
-    image: ghcr.io/huggingface/text-generation-inference:latest
-    container_name: vlm_moon_api
-    volumes:
-      - ./models:/data
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - CUDA_VISIBLE_DEVICES=""
-      - VLLM_TARGET_DEVICE=openvino
-    ports:
-      - "48001:80"
-    command: >
-      --model-id vikhyatk/moondream2
-      --max-total-tokens 1024
-      --trust-remote-code
-
-  # --- Qwen2-VL API (TGI CPU) ---
-  vlm-qwen-api:
-    image: ghcr.io/huggingface/text-generation-inference:latest
-    container_name: vlm_qwen_api
-    volumes:
-      - ./models:/data
-    environment:
-      - HF_TOKEN=${HF_TOKEN}
-      - CUDA_VISIBLE_DEVICES=""
-      - VLLM_TARGET_DEVICE=openvino
-    ports:
-      - "48002:80"
-    command: >
-      --model-id Qwen/Qwen2-VL-2B-Instruct
-      --max-total-tokens 1024
-      --trust-remote-code
+      sh -c 'ffmpeg -f v4l2 -input_format mjpeg -framerate 30 -video_size 640x480 -i /dev/video0 
+      -vcodec libx264 -preset ultrafast -tune zerolatency 
+      -f mpegts udp://host.docker.internal:55080?pkt_size=1316'
 
   stream-operations:
     build:
@@ -79,7 +99,9 @@ services:
       dockerfile: configs/stream-operations/Dockerfile
     container_name: stream_operations
     user: root
-    network_mode: "host"
+    networks:
+      - local-ai-net
+      - shared-ai-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -88,16 +110,12 @@ services:
       - FRAME_RESOLUTION=${FRAME_RESOLUTION}
       - FRAME_RESOLUTION_CROPED=${FRAME_RESOLUTION_CROPED}
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
-      - SMOL_API_URL=http://127.0.0.1:48000/v1/chat/completions
-      - MOON_API_URL=http://127.0.0.1:48001/v1/chat/completions
-      - QWEN_API_URL=http://127.0.0.1:48002/v1/chat/completions
-
+      - LLM_LIST=${LLM_LIST}
+      - OLLAMA_API_URL=${OLLAMA_API_URL}
     volumes:
       - /dev:/dev
       - ./scripts:/app/scripts
       - ./logs:/app/logs
-      - ./entrypoint.sh:/app/entrypoint.sh
-      - ./models:/root/.cache/huggingface
     # Pass the specific script name as an argument
     entrypoint: ["tail", "-f", "/dev/null"]
 

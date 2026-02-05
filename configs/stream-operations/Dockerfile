@@ -27,7 +27,3 @@ RUN pip3 install --no-cache-dir \
     num2words
 
 WORKDIR /app
-
-# Ensure entrypoint is ready
-COPY entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh

@@ -1,76 +1,79 @@
+ifneq ("$(wildcard .env)","")
+    include .env
+    export $(shell sed 's/=.*//' .env)
+endif
+LLM_LIST := $(shell echo $(LLM_LIST) | sed 's/"//g')
+
 # Management Commands
 COMPOSE=docker compose
 
 # Camera Streaming
 CAMERA_URL=http://127.0.0.1:55080?listen=1
+# Variables
+COMPOSE_FILE=docker-compose.yml
+CONTAINER_NAME=ollama-llm
+SETUP_CONTAINER=ollama-setup
 
 
-.PHONY: build up stop force-retry update-llm
+BOOTSTRAP_SCRIPT=./run-ollama.sh
 
-build:
-	$(COMPOSE) build
+.PHONY: help up down restart logs status shell pull-models clean
 
-up:
-	$(COMPOSE) up -d
+help: ## Show this help message
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+up: ## Start all containers with auto-detected GPU IDs
+	@chmod +x $(BOOTSTRAP_SCRIPT)
+	@$(BOOTSTRAP_SCRIPT)
+	@echo "Local AI services (Ollama & Stable Diffusion) are starting..."
+
+down: ## Stop and remove all containers
+	docker compose down
+
+restart: ## Restart all containers
+	docker compose restart
+
+status: ## Show status of containers
+	docker compose ps
+
+rebuild: ## Rebuild and start containers with auto-detected GPU IDs
+	docker compose down --remove-orphans
+	@chmod +x $(BOOTSTRAP_SCRIPT)
+	@./$(BOOTSTRAP_SCRIPT) --build
+	@echo "Rebuild complete."
+	
+logs: ## Follow logs of the Ollama container
+	docker logs -f $(CONTAINER_NAME)
+
+sd-logs: ## Follow Stable Diffusion logs (essential for monitoring torch installation)
+	docker logs -f $(SD_CONTAINER)
+
+sd-shell: ## Enter the Stable Diffusion container
+	docker exec -it $(SD_CONTAINER) /bin/bash
+
+setup-logs: ## Check the progress of model downloads
+	docker logs -f $(SETUP_CONTAINER)
+
+shell: ## Enter the Ollama container shell
+	docker exec -it $(CONTAINER_NAME) /bin/bash
+
+pull-models: ## Pull specific models from Hugging Face
+	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/JoseferEins/SmolVLM-500M-Instruct-fer0;\
+	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/sugiv/cardvaultplus-500m-gguf:Q4_K_M;\
+	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/Mungert/LightOnOCR-1B-1025-GGUF:Q3_K_S;\
+	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/aipib/LightOnOCR-1B-1025-ft-ja1-Q4_K_M-GGUF:Q4_K_M;\
+	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/prithivMLmods/LightOnOCR-1B-1025-AIO-GGUF:Q8_0;\
+	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/mradermacher/Qwen2-VL-2B-Abliterated-Caption-it-i1-GGUF:IQ1_M;
+	
+
+clean: ## Remove containers and prune unused volumes (CAUTION: deletes models)
+	docker compose down -v
+
+check-models: ## List models currently loaded in the container
+	@curl -s http://localhost:11435/api/tags | jq -r '.models[].name'
 
 
-up-smol:
-	$(COMPOSE) up -d smol-vlm
 
-up-moon:
-	$(COMPOSE) up -d moondream
-
-up-qwen:
-	$(COMPOSE) up -d qwen-vl
-
-rebuild:
-	$(COMPOSE) down
-	$(COMPOSE) build
-	$(COMPOSE) up -d
-
-
-rebuild-clean:
-	$(COMPOSE) down --remove-orphans
-	$(COMPOSE) build --no-cache
-	$(COMPOSE) up -d
-
-logs:
-	$(COMPOSE) logs -f
-
-stop:
-	$(COMPOSE) stop
-
-# Force a specific container to restart (re-triggers the entrypoint)
-# Usage: make force-retry target=smol-vlm
-force-retry:
-	@if [ -z "$(target)" ]; then \
-		echo "Error: Specify target, e.g., 'make force-retry target=smol-vlm'"; \
-	else \
-		$(COMPOSE) restart $(target); \
-	fi
-
-# Check and update the LLM weights inside the running container
-update-llm:
-	@if [ -z "$(target)" ]; then \
-		echo "Error: Specify target, e.g., 'make update-llm target=vlm_smol'"; \
-	else \
-		docker exec -it $(target) python3 -c "from transformers import AutoModel; AutoModel.from_pretrained(model_id, force_download=True)" \
-	fi
-
-update-models:
-	@echo "Checking for LLM updates via HuggingFace CLI..."
-	docker exec -it vlm_smol huggingface-cli download HuggingFaceTB/SmolVLM2-500M-Video-Instruct
-	docker exec -it vlm_moondream huggingface-cli download vikhyatk/moondream2
-	docker exec -it vlm_qwen huggingface-cli download Qwen/Qwen2-VL-2B-Instruct
-
-check-cam:
-	@echo "--- 1. Host Check ---"
-	ls -l /dev/video0
-	@echo "--- 2. Docker VM Check ---"
-	# If this fails, Docker Desktop's VM is isolating the hardware
-	docker run --rm -v /dev:/dev alpine ls -l /dev/video0
-	@echo "--- 3. Permission Check ---"
-	getent group video || echo "No video group found on host"
 ### to view ffplay -fflags nobuffer -flags low_delay udp://127.0.0.1:55080
 ###  sudo apt install ffmpeg
 # stream-cam:
