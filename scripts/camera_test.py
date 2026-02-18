@@ -1,61 +1,58 @@
 import cv2
 import os
-import time
+import subprocess
 
-# Directory inside the container (mapped to your host via volumes)
+# --- CONFIGURATION ---
+input_url = "udp://0.0.0.0:55080?pkt_size=1316&buffer_size=10000000&fifo_size=500000"
+output_url = "udp://host.docker.internal:55081?pkt_size=1316"
 output_dir = "/app/logs/captured_frames"
 os.makedirs(output_dir, exist_ok=True)
 
-# Use the address you just verified
-# 0.0.0.0 works if the traffic is being pushed TO this container
-# stream_cam works if this script is PULLING from the other container
-stream_url = "udp://0.0.0.0:55080?pkt_size=1316"
+def process_and_restream():
+    # 1. Setup Input
+    cap = cv2.VideoCapture(input_url, cv2.CAP_FFMPEG)
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 3) # Internal OpenCV buffer
 
-def process_stream():
-    # Adding CAP_FFMPEG backend explicitly for stability
-    cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
-    
-    # Set a small buffer to keep latency low for AI operations
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+    # 2. Setup Output Stream (FFmpeg Pipe)
+    # This takes raw frames from Python and streams them out via UDP
+    ffmpeg_cmd = [
+        'ffmpeg',
+        '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
+        '-s', '640x480', '-pix_fmt', 'bgr24', '-r', '30',
+        '-i', '-', # Input from pipe
+        '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency',
+        '-f', 'mpegts', output_url
+    ]
+    out_pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
 
-    if not cap.isOpened():
-        print("Error: Could not open video stream.")
-        return
+    print(f"Processing started. Reading from 55080, Streaming to 55081...")
 
-    print("Stream started. Press Ctrl+C to stop.")
     count = 0
     try:
         while True:
             ret, frame = cap.read()
             if not ret:
-                print("Dropped frame or stream ended. Reconnecting...")
                 continue
-            
-            # --- YOUR AI LOGIC HERE ---
-            # Example: frame is a standard NumPy array
-            # height, width = frame.shape[:2]
-            
-            # For testing: Print frame data every 30 frames
-            if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) % 30 == 0:
-                print(f"Captured frame: {frame.shape}")
-                count += 1
-                try:
-                    # Generate a filename with a timestamp or counter
-                    filename = f"frame_{count:04d}.jpg"
-                    filepath = os.path.join(output_dir, filename)
 
-                    # Save the frame
-                    # [Quality 90 is a good balance for AI and storage]
-                    cv2.imwrite(filepath, frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-                    print(f"Saved: {filepath}")
-                except Exception as e:
-                    print(f"Error saving frame: {e}")
-                
+            # --- OPTIONAL: DRAW ON FRAME (AI Visuals) ---
+            # cv2.putText(frame, "AI ACTIVE", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            # 3. Save JPG (Every 30th frame)
+            if count % 30 == 0:
+                filepath = os.path.join(output_dir, f"frame_{count//30:04d}.jpg")
+                cv2.imwrite(filepath, frame)
+                print(f"Saved JPG: {filepath}")
+
+            # 4. Push frame to output stream
+            out_pipe.stdin.write(frame.tobytes())
+            count += 1
 
     except KeyboardInterrupt:
         print("Stopping...")
     finally:
         cap.release()
+        out_pipe.stdin.close()
+        out_pipe.terminate()
 
 if __name__ == "__main__":
-    process_stream()
+    process_and_restream()
