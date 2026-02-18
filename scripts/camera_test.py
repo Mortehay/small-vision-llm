@@ -9,12 +9,20 @@ import re
 import time
 import threading
 import logging
+from datetime import datetime
 
 # --- LOGGING SETUP ---
+# Generate timestamp for the log filename
+timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+log_filename = f"/app/logs/ai_debug_{timestamp}.log"
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[logging.StreamHandler()]
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(log_filename)
+    ]
 )
 logger = logging.getLogger("AI_Worker")
 
@@ -42,6 +50,7 @@ def setup_dirs():
         os.makedirs(d)
 
 def maintain_limit(path, limit):
+    """Deletes oldest files if folder exceeds limit."""
     files = sorted(glob.glob(os.path.join(path, "*.jpg")), key=os.path.getctime)
     while len(files) >= limit:
         deleted = files.pop(0)
@@ -49,7 +58,7 @@ def maintain_limit(path, limit):
 
 def ai_worker():
     global last_ai_text, current_frame_for_ai, new_frame_available, detection_box
-    logger.info(f"AI Worker started. Target Model: {MODEL_ID}")
+    logger.info(f"AI Worker started. Logging to: {log_filename}")
     
     while True:
         if new_frame_available and current_frame_for_ai is not None:
@@ -72,56 +81,52 @@ def ai_worker():
                     "stream": False
                 }
                 
-                logger.info("Sending request to Ollama API...")
+                logger.info("Requesting inference...")
                 response = requests.post(API_URL, json=payload, timeout=60)
                 response.raise_for_status()
                 
                 result = response.json()
                 last_ai_text = result.get('message', {}).get('content', '').strip()
-                logger.info(f"Model Response: {last_ai_text}")
+                logger.info(f"AI Output: {last_ai_text}")
 
-                # Extract coordinates [ymin, xmin, ymax, xmax]
+                # Extract coordinates
                 coords = re.findall(r"(\d+)", last_ai_text)
                 if len(coords) >= 4:
-                    raw_box = [int(c) for c in coords[:4]]
-                    # SmolVLM usually uses 0-1000 range. Scale to 640x480.
-                    ymin, xmin, ymax, xmax = raw_box
+                    # Scaling logic: SmolVLM (0-1000) -> Frame (640x480)
+                    ymin, xmin, ymax, xmax = [int(c) for c in coords[:4]]
                     detection_box = [
                         int(ymin * 480 / 1000), 
                         int(xmin * 640 / 1000), 
                         int(ymax * 480 / 1000), 
                         int(xmax * 640 / 1000)
                     ]
-                    logger.info(f"Detected box (scaled): {detection_box}")
+                    logger.info(f"Detection Box: {detection_box}")
                 else:
                     detection_box = None
-                    logger.warning("No coordinates found in model response.")
                 
-                # Save AI snapshot
+                # Save AI Debug Image
                 maintain_limit(AI_LOG_DIR, MAX_IMAGES)
                 ai_filename = os.path.join(AI_LOG_DIR, f"ai_{int(time.time())}.jpg")
                 cv2.imwrite(ai_filename, frame_to_process)
                 
-                elapsed = time.time() - start_time
-                logger.info(f"Inference cycle complete in {elapsed:.2f}s")
+                logger.info(f"Cycle time: {time.time() - start_time:.2f}s")
 
             except Exception as e:
-                logger.error(f"AI Worker Error: {e}")
-                last_ai_text = f"API Error: {str(e)[:15]}"
+                logger.error(f"Worker Error: {e}")
+                last_ai_text = f"Error: {str(e)[:15]}"
         else:
             time.sleep(0.1)
 
 def main():
-    global current_frame_for_ai, new_frame_available, detection_box, last_ai_text
+    global current_frame_for_ai, new_frame_available, detection_box
     setup_dirs()
     
     # Start AI Thread
     threading.Thread(target=ai_worker, daemon=True).start()
 
-    logger.info(f"Connecting to stream: {INPUT_URL}")
     cap = cv2.VideoCapture(INPUT_URL, cv2.CAP_FFMPEG)
     
-    # Output pipe
+    # Restreaming pipe
     ffmpeg_cmd = [
         'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-s', '640x480', '-pix_fmt', 'bgr24', '-r', '30', '-i', '-', 
@@ -136,25 +141,22 @@ def main():
             ret, frame = cap.read()
             if not ret: continue
 
-            # Feed the AI thread
             if not new_frame_available:
                 current_frame_for_ai = frame.copy()
                 new_frame_available = True
 
-            # Draw UI
+            # Visualize detection
             if detection_box:
-                ymin, xmin, ymax, xmax = detection_box
-                # Draw Box
-                cv2.rectangle(frame, (xmin, ymin), (xmax, ymax), (0, 255, 0), 2)
-                # Label
-                cv2.putText(frame, "HUMAN", (xmin, ymin - 10), 
+                y1, x1, y2, x2 = detection_box
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, "HUMAN", (x1, y1 - 10), 
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
-            # Status Overlay
-            cv2.putText(frame, f"AI: {last_ai_text[:40]}", (10, 460), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+            # Status line
+            cv2.putText(frame, f"Log: {os.path.basename(log_filename)}", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
-            # Raw Logging
+            # Periodic raw logging
             if count % 60 == 0:
                 maintain_limit(LOG_DIR, MAX_IMAGES)
                 cv2.imwrite(os.path.join(LOG_DIR, f"raw_{int(time.time())}.jpg"), frame)
@@ -163,11 +165,10 @@ def main():
             count += 1
 
     except KeyboardInterrupt:
-        logger.info("Shutdown requested.")
+        logger.info("Exiting...")
     finally:
         cap.release()
         out_pipe.terminate()
-        logger.info("Cleanup complete.")
 
 if __name__ == "__main__":
     main()
