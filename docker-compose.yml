@@ -26,6 +26,13 @@ services:
       local-ai-net:
         aliases:
           - ollama.loc
+    deploy:
+      resources:
+        limits:
+          memory: 8G  # Adjust based on your physical RAM
+        reservations:
+          memory: 4G
+
     ports:
       - "11435:11434"
     volumes:

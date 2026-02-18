@@ -58,64 +58,74 @@ def maintain_limit(path, limit):
 
 def ai_worker():
     global last_ai_text, current_frame_for_ai, new_frame_available, detection_box
-    logger.info(f"AI Worker started. Logging to: {log_filename}")
+    logger.info("AI Worker (CPU Optimized) started.")
     
     while True:
         if new_frame_available and current_frame_for_ai is not None:
-            start_time = time.time()
             try:
                 frame_to_process = current_frame_for_ai.copy()
                 new_frame_available = False 
                 
-                # Encode to Base64
-                _, buffer = cv2.imencode('.jpg', cv2.resize(frame_to_process, (384, 384)))
+                # REDUCE SIZE: 224x224 is standard for many CPU vision models
+                # This makes the base64 string smaller and the math faster
+                small_frame = cv2.resize(frame_to_process, (224, 224))
+                _, buffer = cv2.imencode('.jpg', small_frame)
                 img_b64 = base64.b64encode(buffer).decode('utf-8')
                 
                 payload = {
                     "model": MODEL_ID,
-                    "messages": [{
-                        "role": "user",
-                        "content": "Detect humans and return bounding boxes [ymin, xmin, ymax, xmax].",
-                        "images": [img_b64] 
-                    }],
-                    "stream": False
+                    "messages": [
+                        {
+                            "role": "user", 
+                            # Simplest possible detection prompt for VLM
+                            "content": "Can you provide the bounding box for the face in this image? Respond with [ymin, xmin, ymax, xmax]", 
+                            "images": [img_b64]
+                        }
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0,
+                        "num_predict": 30, # Small limit to prevent essays
+                        "num_thread": 4,  # Adjust to your CPU cores
+                        "num_ctx": 1024
+                    }
                 }
                 
-                logger.info("Requesting inference...")
-                response = requests.post(API_URL, json=payload, timeout=60)
+                logger.info("Requesting CPU Inference...")
+                response = requests.post(API_URL, json=payload, timeout=120)
                 response.raise_for_status()
                 
-                result = response.json()
-                last_ai_text = result.get('message', {}).get('content', '').strip()
+                last_ai_text = response.json().get('message', {}).get('content', '').strip()
                 logger.info(f"AI Output: {last_ai_text}")
 
-                # Extract coordinates
-                coords = re.findall(r"(\d+)", last_ai_text)
-                if len(coords) >= 4:
-                    # Scaling logic: SmolVLM (0-1000) -> Frame (640x480)
-                    ymin, xmin, ymax, xmax = [int(c) for c in coords[:4]]
-                    detection_box = [
-                        int(ymin * 480 / 1000), 
-                        int(xmin * 640 / 1000), 
-                        int(ymax * 480 / 1000), 
-                        int(xmax * 640 / 1000)
-                    ]
-                    logger.info(f"Detection Box: {detection_box}")
+                # Improved Regex: Catch numbers in brackets or plain text
+                # Looks for integers or decimals
+                nums = re.findall(r"(\d+\.\d+|\d+)", last_ai_text)
+                
+                if len(nums) >= 4:
+                    # Convert found strings to floats
+                    vals = [float(n) for n in nums[:4]]
+                    h, w = 480, 640
+                    
+                    # Normalize if the model gives us 0-1 values
+                    if all(0 <= v <= 1 for v in vals):
+                        ymin, xmin, ymax, xmax = vals
+                        detection_box = [int(ymin*h), int(xmin*w), int(ymax*h), int(xmax*w)]
+                    # Normalize if the model gives us 0-1000 values
+                    else:
+                        ymin, xmin, ymax, xmax = vals
+                        detection_box = [int(ymin*h/1000), int(xmin*w/1000), int(ymax*h/1000), int(xmax*w/1000)]
+                    
+                    logger.info(f"Final Box: {detection_box}")
                 else:
                     detection_box = None
-                
-                # Save AI Debug Image
-                maintain_limit(AI_LOG_DIR, MAX_IMAGES)
-                ai_filename = os.path.join(AI_LOG_DIR, f"ai_{int(time.time())}.jpg")
-                cv2.imwrite(ai_filename, frame_to_process)
-                
-                logger.info(f"Cycle time: {time.time() - start_time:.2f}s")
+                    logger.warning("No coordinates found. Model returned text/markdown.")
 
             except Exception as e:
                 logger.error(f"Worker Error: {e}")
-                last_ai_text = f"Error: {str(e)[:15]}"
+                time.sleep(5) # Wait longer on error to let CPU cool down
         else:
-            time.sleep(0.1)
+            time.sleep(0.5) # Don't check too often on CPU
 
 def main():
     global current_frame_for_ai, new_frame_available, detection_box
