@@ -91,7 +91,8 @@ services:
     entrypoint: >
       sh -c 'ffmpeg -f v4l2 -input_format mjpeg -framerate 30 -video_size 640x480 -i /dev/video0 
       -vcodec libx264 -preset ultrafast -tune zerolatency 
-      -f mpegts udp://host.docker.internal:55080?pkt_size=1316'
+      -x264-params "keyint=30:min-keyint=30:scenecut=0"
+      -f mpegts udp://stream_operations:55080?pkt_size=1316'
 
   stream-operations:
     build:
