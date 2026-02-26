@@ -1,7 +1,7 @@
-# Use a slim Python 3.10 image
-FROM python:3.10-slim
+# Use a slim Python 3.12 image
+FROM python:3.12-slim
 
-# Install modern system dependencies for OpenCV
+# Install system dependencies for OpenCV and FFmpeg
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
@@ -12,18 +12,20 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install CPU-specific PyTorch (much smaller for your Ryzen 5)
+WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY configs/stream-operations/requirements.txt ./requirements.txt
+
+# Install CPU-specific PyTorch (remains separate due to custom index URL)
 RUN pip3 install --no-cache-dir \
     torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
-# Install VLM libraries
-RUN pip3 install --no-cache-dir \
-    transformers \
-    accelerate \
-    opencv-python-headless \
-    pillow \
-    timm \
-    qwen-vl-utils \
-    num2words
+# Install all other dependencies from the file
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-WORKDIR /app
+# Copy the rest of your scripts
+COPY . .
+
+# Start the Flask API
+ENTRYPOINT ["python", "scripts/app.py"]

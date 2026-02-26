@@ -79,51 +79,51 @@ services:
   # --- Camera Streamer ---
   stream-cam:
     container_name: stream-cam
-    image: jrottenberg/ffmpeg
+    # Use an image with python and ffmpeg, or build your own
+    image: python:3.12-slim
     user: root
     privileged: true 
     networks:
       - local-ai-net
       - shared-ai-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    ports:
+      - "5000:5000" # Port for the Control API
     volumes:
       - /dev:/dev
+      - ./scripts:/app
+      - ./scripts/camera_control.py:/app/camera_control.py
     devices:
       - /dev/video0:/dev/video0
     environment:
       - FRAME_RESOLUTION=${FRAME_RESOLUTION}
-      - FRAME_RESOLUTION_CROP=${FRAME_RESOLUTION_CROP}
       - CAMERA_URL=${CAMERA_URL}
+    working_dir: /app
     entrypoint: >
-      sh -c 'ffmpeg -f v4l2 -input_format mjpeg -framerate 30 -video_size 640x480 -i /dev/video0 
-      -vcodec libx264 -preset ultrafast -tune zerolatency 
-      -x264-params "keyint=30:min-keyint=30:scenecut=0"
-      -f mpegts udp://stream_operations:55080?pkt_size=1316'
+      sh -c "apt-get update && apt-get install -y ffmpeg procps && 
+             pip install flask && 
+             python camera_control.py"
 
   stream-operations:
     build:
       context: .
-      dockerfile: configs/stream-operations/Dockerfile
+      dockerfile: ./configs/stream-operations/Dockerfile 
     container_name: stream_operations
     user: root
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - local-ai-net
       - shared-ai-network
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    ports:
+      - "6000:6000"
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - CAMERA_URL=${CAMERA_URL}
-      - FRAME_RESOLUTION=${FRAME_RESOLUTION}
-      - FRAME_RESOLUTION_CROPED=${FRAME_RESOLUTION_CROPED}
-      - HSA_OVERRIDE_GFX_VERSION=10.3.0
-      - LLM_LIST=${LLM_LIST}
       - OLLAMA_API_URL=${OLLAMA_API_URL}
     volumes:
       - /dev:/dev
       - ./scripts:/app/scripts
       - ./logs:/app/logs
-    # Pass the specific script name as an argument
-    entrypoint: ["tail", "-f", "/dev/null"]
+      - ./images:/app/images
+    entrypoint: ["python", "/app/scripts/app.py"]
 

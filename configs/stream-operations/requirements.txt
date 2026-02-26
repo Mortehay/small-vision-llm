@@ -1,0 +1,19 @@
+# Web & API
+flask
+requests
+
+# Computer Vision & Image Processing
+opencv-python
+pillow
+
+# AI & VLM
+transformers
+accelerate
+timm
+qwen-vl-utils
+num2words
+
+# Core AI (CPU-only versions handled separately for size)
+# torch
+# torchvision
+# torchaudio

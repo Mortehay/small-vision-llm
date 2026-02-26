@@ -2,141 +2,117 @@ import cv2
 import os
 import subprocess
 import shutil
-import glob
 import base64
 import requests
 import re
 import time
 import threading
 import logging
-from datetime import datetime
-
-# --- LOGGING SETUP ---
-# Generate timestamp for the log filename
-timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-log_filename = f"/app/logs/ai_debug_{timestamp}.log"
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(log_filename)
-    ]
-)
-logger = logging.getLogger("AI_Worker")
+from datetime import datetime  # CRITICAL: Fixes the NameError
 
 # --- CONFIGURATION ---
-INPUT_URL = "udp://0.0.0.0:55080?pkt_size=1316&buffer_size=10000000&fifo_size=500000"
-OUTPUT_URL = "udp://host.docker.internal:55081?pkt_size=1316"
+LLM_NAME = "SmolVLM-500M-Instruct-fer0"
+INPUT_URL = "udp://0.0.0.0:55080?pkt_size=1316"
+OUTPUT_URL = "udp://172.17.0.1:55081?pkt_size=1316"
 API_URL = "http://ollama-llm:11434/api/chat"
-MODEL_ID = "hf.co/JoseferEins/SmolVLM-500M-Instruct-fer0:latest"
+MODEL_ID = f"hf.co/JoseferEins/{LLM_NAME}:latest"
+IMAGE_DIR = f"/app/images/{LLM_NAME}/captured_frames"
+LOG_DIR = f"/app/logs/{LLM_NAME}"  # Directory for log files
 
-LOG_DIR = "/app/logs/captured_frames"
-AI_LOG_DIR = "/app/logs/captured_frames_smol_llm"
-MAX_IMAGES = 20
+# --- LOGGING SETUP ---
+def get_logger():
+    if not os.path.exists(LOG_DIR):
+        os.makedirs(LOG_DIR, exist_ok=True)
+    
+    # Create unique log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_filename = f"{LOG_DIR}/ai_debug_{timestamp}.log"
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(log_filename)  # Re-enables the log file
+        ]
+    )
+    return logging.getLogger("AI_Worker")
 
-# --- SHARED STATE ---
-current_frame_for_ai = None
-new_frame_available = False
-detection_box = None # [ymin, xmin, ymax, xmax]
-last_ai_text = "Initializing..."
+logger = get_logger()
+
+# Global state
+state = {
+    "current_frame": None,
+    "new_frame_available": False,
+    "detection_box": None,
+    "running": True
+}
 
 def setup_dirs():
-    for d in [LOG_DIR, AI_LOG_DIR]:
-        if os.path.exists(d):
-            logger.info(f"Cleaning directory: {d}")
-            shutil.rmtree(d)
-        os.makedirs(d)
-
-def maintain_limit(path, limit):
-    """Deletes oldest files if folder exceeds limit."""
-    files = sorted(glob.glob(os.path.join(path, "*.jpg")), key=os.path.getctime)
-    while len(files) >= limit:
-        deleted = files.pop(0)
-        os.remove(deleted)
+    """Wipe old images, but keep old logs."""
+    if os.path.exists(IMAGE_DIR):
+        shutil.rmtree(IMAGE_DIR)
+    os.makedirs(IMAGE_DIR, exist_ok=True)
+    if not os.path.exists(LOG_DIR):
+        os.makedirs(LOG_DIR, exist_ok=True)
 
 def ai_worker():
-    global last_ai_text, current_frame_for_ai, new_frame_available, detection_box
-    logger.info("AI Worker (CPU Optimized) started.")
-    
-    while True:
-        if new_frame_available and current_frame_for_ai is not None:
+    """Background thread for LLM inference"""
+    logger.info("AI Worker Thread started.")
+    while state["running"]:
+        if state["new_frame_available"] and state["current_frame"] is not None:
             try:
-                frame_to_process = current_frame_for_ai.copy()
-                new_frame_available = False 
+                # 1. Save "Before" Image
+                ts = int(time.time())
+                frame = state["current_frame"].copy()
+                cv2.imwrite(f"{IMAGE_DIR}/frame_{ts}_before.jpg", frame)
                 
-                # REDUCE SIZE: 224x224 is standard for many CPU vision models
-                # This makes the base64 string smaller and the math faster
-                small_frame = cv2.resize(frame_to_process, (224, 224))
+                state["new_frame_available"] = False 
+                
+                logger.info(f"Frame {ts}: Sending to AI...")
+                
+                # Inference payload
+                small_frame = cv2.resize(frame, (224, 224))
                 _, buffer = cv2.imencode('.jpg', small_frame)
                 img_b64 = base64.b64encode(buffer).decode('utf-8')
                 
                 payload = {
                     "model": MODEL_ID,
-                    "messages": [
-                        {
-                            "role": "user", 
-                            # Simplest possible detection prompt for VLM
-                            "content": "Can you provide the bounding box for the face in this image? Respond with [ymin, xmin, ymax, xmax]", 
-                            "images": [img_b64]
-                        }
-                    ],
+                    "messages": [{"role": "user", "content": "Provide face bounding box [ymin, xmin, ymax, xmax]", "images": [img_b64]}],
                     "stream": False,
-                    "options": {
-                        "temperature": 0,
-                        "num_predict": 30, # Small limit to prevent essays
-                        "num_thread": 4,  # Adjust to your CPU cores
-                        "num_ctx": 1024
-                    }
+                    "options": {"temperature": 0, "num_predict": 30, "num_thread": 4}
                 }
                 
-                logger.info("Requesting CPU Inference...")
-                response = requests.post(API_URL, json=payload, timeout=120)
-                response.raise_for_status()
+                response = requests.post(API_URL, json=payload, timeout=60)
+                res_text = response.json().get('message', {}).get('content', '')
                 
-                last_ai_text = response.json().get('message', {}).get('content', '').strip()
-                logger.info(f"AI Output: {last_ai_text}")
-
-                # Improved Regex: Catch numbers in brackets or plain text
-                # Looks for integers or decimals
-                nums = re.findall(r"(\d+\.\d+|\d+)", last_ai_text)
-                
+                nums = re.findall(r"(\d+\.\d+|\d+)", res_text)
                 if len(nums) >= 4:
-                    # Convert found strings to floats
                     vals = [float(n) for n in nums[:4]]
                     h, w = 480, 640
+                    div = 1.0 if all(0 <= v <= 1 for v in vals) else 1000.0
+                    state["detection_box"] = [int(vals[0]*h/div), int(vals[1]*w/div), int(vals[2]*h/div), int(vals[3]*w/div)]
                     
-                    # Normalize if the model gives us 0-1 values
-                    if all(0 <= v <= 1 for v in vals):
-                        ymin, xmin, ymax, xmax = vals
-                        detection_box = [int(ymin*h), int(xmin*w), int(ymax*h), int(xmax*w)]
-                    # Normalize if the model gives us 0-1000 values
-                    else:
-                        ymin, xmin, ymax, xmax = vals
-                        detection_box = [int(ymin*h/1000), int(xmin*w/1000), int(ymax*h/1000), int(xmax*w/1000)]
-                    
-                    logger.info(f"Final Box: {detection_box}")
+                    # 2. Save "After" Image
+                    y1, x1, y2, x2 = state["detection_box"]
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                    cv2.imwrite(f"{IMAGE_DIR}/frame_{ts}_after.jpg", frame)
+                    logger.info(f"AI Success: Box saved for frame {ts}")
                 else:
-                    detection_box = None
-                    logger.warning("No coordinates found. Model returned text/markdown.")
-
+                    logger.warning(f"AI returned no box: {res_text}")
+                    
             except Exception as e:
-                logger.error(f"Worker Error: {e}")
-                time.sleep(5) # Wait longer on error to let CPU cool down
-        else:
-            time.sleep(0.5) # Don't check too often on CPU
+                logger.error(f"AI Thread Error: {e}")
+        time.sleep(0.1)
 
-def main():
-    global current_frame_for_ai, new_frame_available, detection_box
+def run_analysis_loop():
     setup_dirs()
+    state["running"] = True
+    frame_count = 0
     
-    # Start AI Thread
     threading.Thread(target=ai_worker, daemon=True).start()
-
     cap = cv2.VideoCapture(INPUT_URL, cv2.CAP_FFMPEG)
     
-    # Restreaming pipe
     ffmpeg_cmd = [
         'ffmpeg', '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-s', '640x480', '-pix_fmt', 'bgr24', '-r', '30', '-i', '-', 
@@ -145,40 +121,31 @@ def main():
     ]
     out_pipe = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE)
 
-    count = 0
     try:
-        while True:
+        while state["running"]:
             ret, frame = cap.read()
-            if not ret: continue
+            if not ret:
+                continue
 
-            if not new_frame_available:
-                current_frame_for_ai = frame.copy()
-                new_frame_available = True
+            frame_count += 1
 
-            # Visualize detection
-            if detection_box:
-                y1, x1, y2, x2 = detection_box
+            # Trigger AI every 30 frames
+            if frame_count % 30 == 0:
+                if not state["new_frame_available"]:
+                    state["current_frame"] = frame.copy()
+                    state["new_frame_available"] = True
+                    logger.info(f"Frame {frame_count}: Triggering AI analysis.")
+
+            # Live Overlay
+            if state["detection_box"]:
+                y1, x1, y2, x2 = state["detection_box"]
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.putText(frame, "HUMAN", (x1, y1 - 10), 
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
-            # Status line
-            cv2.putText(frame, f"Log: {os.path.basename(log_filename)}", (10, 30), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
-
-            # Periodic raw logging
-            if count % 60 == 0:
-                maintain_limit(LOG_DIR, MAX_IMAGES)
-                cv2.imwrite(os.path.join(LOG_DIR, f"raw_{int(time.time())}.jpg"), frame)
-
-            out_pipe.stdin.write(frame.tobytes())
-            count += 1
-
-    except KeyboardInterrupt:
-        logger.info("Exiting...")
+            try:
+                out_pipe.stdin.write(frame.tobytes())
+            except:
+                break
     finally:
+        state["running"] = False
         cap.release()
         out_pipe.terminate()
-
-if __name__ == "__main__":
-    main()
