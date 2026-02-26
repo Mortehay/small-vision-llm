@@ -11,11 +11,19 @@ process = None
 UDP_DEST = "udp://stream_operations:55080?pkt_size=1316"
 
 FFMPEG_CMD = [
-    "ffmpeg", "-hide_banner", "-loglevel", "error",
-    "-f", "v4l2", "-video_size", "640x480", "-i", "/dev/video0",
-    "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
+    "ffmpeg", "-hide_banner", 
+    "-f", "v4l2", 
+    "-input_format", "yuyv422",  # Explicitly set based on your manual test success
+    "-video_size", "640x480", 
+    "-i", "/dev/video0",
+    "-c:v", "libx264", 
+    "-preset", "ultrafast", 
+    "-tune", "zerolatency",
+    "-g", "30", 
+    "-flags", "+global_header", 
     "-pix_fmt", "yuv420p", 
-    "-f", "mpegts", UDP_DEST
+    "-f", "mpegts", 
+    UDP_DEST
 ]
 
 def kill_existing_ffmpeg():
@@ -29,23 +37,22 @@ def kill_existing_ffmpeg():
 @app.route('/start', methods=['POST'])
 def start_stream():
     global process
-    
-    # Always attempt a clean start by killing ghosts
     kill_existing_ffmpeg()
     
     try:
-        log_file = open("/tmp/ffmpeg_debug.log", "w")
+        # Use line buffering (buffering=1) so logs appear immediately
+        log_file = open("/tmp/ffmpeg_debug.log", "w", buffering=1)
         process = subprocess.Popen(
             FFMPEG_CMD,
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            preexec_fn=os.setpgrp
+            preexec_fn=os.setpgrp,
+            universal_newlines=True # Helps with text-based logging
         )
         
-        # Verify the process didn't immediately crash
-        time.sleep(1.5)
+        time.sleep(2.0) # Increased wait time
         if process.poll() is not None:
-            return jsonify({"error": "FFmpeg failed to initialize camera. Check /tmp/ffmpeg_debug.log"}), 500
+            return jsonify({"error": "FFmpeg exited immediately"}), 500
             
         return jsonify({"status": "Stream started", "pid": process.pid}), 200
     except Exception as e:

@@ -9,4 +9,5 @@
 /ollama_data/*
 !/webui_data
 /webui_data/*
-
+!images
+/images/*

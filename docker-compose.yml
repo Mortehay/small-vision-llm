@@ -87,13 +87,17 @@ services:
       - local-ai-net
       - shared-ai-network
     ports:
-      - "5000:5000" # Port for the Control API
+      - "5000:5000"
     volumes:
       - /dev:/dev
       - ./scripts:/app
       - ./scripts/camera_control.py:/app/camera_control.py
     devices:
       - /dev/video0:/dev/video0
+    deploy:
+      resources:
+        limits:
+          memory: 8G
     environment:
       - FRAME_RESOLUTION=${FRAME_RESOLUTION}
       - CAMERA_URL=${CAMERA_URL}
