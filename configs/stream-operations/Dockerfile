@@ -1,7 +1,7 @@
 # Use a slim Python 3.12 image
 FROM python:3.12-slim
 
-# Install system dependencies for OpenCV and FFmpeg
+# Install system dependencies (Adding curl to fetch Node.js)
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
@@ -10,21 +10,22 @@ RUN apt-get update && apt-get install -y \
     tcpdump \
     netcat-openbsd \
     ffmpeg \
+    curl \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements first to leverage Docker cache
+# Copy requirements first
 COPY configs/stream-operations/requirements.txt ./requirements.txt
 
-# Install CPU-specific PyTorch (remains separate due to custom index URL)
+# Install Python dependencies
 RUN pip3 install --no-cache-dir \
     torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-# Install all other dependencies from the file
 RUN pip3 install --no-cache-dir -r requirements.txt
 
-# Copy the rest of your scripts
+# Copy everything (including your frontend folder)
 COPY . .
 
 # Start the Flask API

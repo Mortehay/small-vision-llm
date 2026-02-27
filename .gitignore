@@ -11,3 +11,5 @@
 /webui_data/*
 !images
 /images/*
+/frontend/node_modules
+/frontend/.env

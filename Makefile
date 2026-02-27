@@ -26,6 +26,8 @@ up: ## Start all containers with auto-detected GPU IDs
 	@chmod +x $(BOOTSTRAP_SCRIPT)
 	@$(BOOTSTRAP_SCRIPT)
 	@echo "Local AI services (Ollama & Stable Diffusion) are starting..."
+	$(COMPOSE) up -d
+	@echo "All services are starting..."
 
 down: ## Stop and remove all containers
 	docker compose down
@@ -54,8 +56,8 @@ sd-shell: ## Enter the Stable Diffusion container
 setup-logs: ## Check the progress of model downloads
 	docker logs -f $(SETUP_CONTAINER)
 
-shell: ## Enter the Ollama container shell
-	docker exec -it $(CONTAINER_NAME) /bin/bash
+shell: ## Enter a container shell (usage: make shell c=container_name)
+	docker exec -it $(c) /bin/bash || docker exec -it $(c) /bin/sh
 
 pull-models: ## Pull specific models from Hugging Face
 	docker exec -i -e HF_TOKEN=$(HF_TOKEN) $(CONTAINER_NAME) ollama pull hf.co/JoseferEins/SmolVLM-500M-Instruct-fer0;\
@@ -109,12 +111,3 @@ stream-cam:
 # Use this to check if the container can actually "see" the host
 test-net:
 	docker exec -it vlm_smol ping -c 3 host.docker.internal
-
-# Open an interactive shell in a container
-# Usage: make shell name=vlm_smol
-shell:
-	@if [ -z "$(name)" ]; then \
-		echo "Error: Specify container name, e.g., 'make shell name=vlm_smol'"; \
-	else \
-		docker exec -it $(name) /bin/bash; \
-	fi

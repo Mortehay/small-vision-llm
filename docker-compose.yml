@@ -104,7 +104,7 @@ services:
     working_dir: /app
     entrypoint: >
       sh -c "apt-get update && apt-get install -y ffmpeg procps && 
-             pip install flask && 
+             pip install flask flask-cors flask-socketio && 
              python camera_control.py"
 
   stream-operations:
@@ -119,7 +119,8 @@ services:
       - local-ai-net
       - shared-ai-network
     ports:
-      - "6000:6000"
+      - "5001:5001"
+      - "5173:5173"
     environment:
       - HF_TOKEN=${HF_TOKEN}
       - CAMERA_URL=${CAMERA_URL}
@@ -127,6 +128,7 @@ services:
     volumes:
       - /dev:/dev
       - ./scripts:/app/scripts
+      - ./frontend:/app/frontend
       - ./logs:/app/logs
       - ./images:/app/images
     entrypoint: ["python", "/app/scripts/app.py"]

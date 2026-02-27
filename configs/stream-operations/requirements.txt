@@ -13,6 +13,11 @@ timm
 qwen-vl-utils
 num2words
 
+flask-socketio
+flask-cors
+tailer
+requests
+
 # Core AI (CPU-only versions handled separately for size)
 # torch
 # torchvision

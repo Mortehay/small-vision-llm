@@ -6,6 +6,7 @@ import base64
 import requests
 import re
 import time
+import sys
 import threading
 import logging
 from datetime import datetime
@@ -21,23 +22,38 @@ IMAGE_DIR = f"/app/images/{LLM_NAME}/captured_frames"
 LOG_DIR = f"/app/logs/{LLM_NAME}" # FIX 2: Ensure LOG_DIR is defined
 
 # --- LOGGING SETUP ---
-def get_logger():
-    # Ensure directory exists before trying to write a file
-    os.makedirs(LOG_DIR, exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H")
-    log_filename = f"{LOG_DIR}/ai_debug_{timestamp}.log"
-    
+# --- camera_test.py ---
 
+def get_logger():
+    # Use an absolute path for reliability
+    abs_log_dir = "/app/logs/SmolVLM-500M-Instruct-fer0"
+    os.makedirs(abs_log_dir, exist_ok=True)
+    
+    timestamp = datetime.now().strftime("%Y%m%d") # Group by day
+    log_filename = os.path.join(abs_log_dir, f"ai_debug_{timestamp}.log")
+
+    # Clear existing handlers to prevent duplicate logs in multiprocessing
+    root = logging.getLogger()
+    if root.handlers:
+        for handler in root.handlers:
+            root.removeHandler(handler)
+
+    # Reconfigure with a StreamHandler that flushes immediately
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(levelname)s] %(message)s',
         handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(log_filename) 
+            logging.StreamHandler(sys.stdout), # Console
+            logging.FileHandler(log_filename, mode='a', delay=False) # Direct file write
         ]
     )
-    return logging.getLogger("AI_Worker")
+    
+    # Force the file handler to flush after every record
+    logger = logging.getLogger("AI_Worker")
+    for handler in logging.root.handlers:
+        handler.flush = sys.stdout.flush # Bridge flushing logic
+        
+    return logger
 
 def test_udp_network(url, timeout=5):
     try:
@@ -84,7 +100,46 @@ def setup_dirs():
         os.makedirs(LOG_DIR, exist_ok=True)
     else:
         logger.info(f"Log directory preserved: {LOG_DIR}")
-  
+
+def save_and_clean_frame(frame, saved_count):
+    """Saves a new frame and strictly ensures only the 10 most recent images exist."""
+    try:
+        # 1. Ensure absolute path and directory existence
+        if not os.path.exists(IMAGE_DIR):
+            os.makedirs(IMAGE_DIR, exist_ok=True)
+
+        # 2. Re-scan the directory IMMEDIATELY before saving
+        # We use modification time (mtime) which is more reliable than creation time (ctime)
+        files = [os.path.join(IMAGE_DIR, f) for f in os.listdir(IMAGE_DIR) if f.endswith('.jpg')]
+        files.sort(key=os.path.getmtime) # Oldest at index 0
+        
+        # 3. Aggressive Cleanup: If we have 10 or more, remove oldest until we have 9
+        # This makes room for the one we are about to save
+        if len(files) >= 10:
+            to_delete = files[:(len(files) - 9)] # Slice all but the 9 newest
+            for oldest_file in to_delete:
+                try:
+                    os.remove(oldest_file)
+                    logger.info(f"Cleanup: Removed oldest frame {os.path.basename(oldest_file)}")
+                except Exception as delete_err:
+                    logger.error(f"Failed to delete {oldest_file}: {delete_err}")
+
+        # 4. Save the new 10th frame
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"frame_{saved_count:04d}_{timestamp}.jpg"
+        filepath = os.path.join(IMAGE_DIR, filename)
+        
+        cv2.imwrite(filepath, frame)
+        
+        # Update global state
+        state["current_frame"] = frame
+        state["new_frame_available"] = True
+        
+        logger.info(f"Saved AI Snapshot: {filename}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to save/clean frame: {e}")
+        return False
 
 def run_analysis_loop():
     global state
@@ -138,17 +193,8 @@ def run_analysis_loop():
             # --- 4. SAMPLING FOR AI ---
             if frame_count % 30 == 0:
                 logger.info(f"Sampling frame {frame_count}")
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"frame_{saved_count:04d}_{timestamp}.jpg"
-                filepath = os.path.join(IMAGE_DIR, filename)
-                
-                cv2.imwrite(filepath, frame)
-                
-                state["current_frame"] = frame
-                state["new_frame_available"] = True
-                
-                logger.info(f"Saved AI Snapshot: {filename} {filepath}")
-                saved_count += 1
+                if save_and_clean_frame(frame, saved_count):
+                    saved_count += 1
 
             frame_count += 1
             

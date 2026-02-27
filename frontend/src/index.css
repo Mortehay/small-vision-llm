@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+/* If you use @apply (like for your body background), 
+   you must reference tailwind so it knows what the classes mean.
+*/
+@layer base {
+  body {
+    @apply bg-slate-900 text-white;
+  }
+}
