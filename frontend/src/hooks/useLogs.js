@@ -10,7 +10,10 @@ export const useLogs = (maxLines = 50) => {
   useEffect(() => {
     // Connect to the Flask-SocketIO server
     const socket = io(API_URL, {
-      transports: ['websocket'],
+      transports: ['websocket', 'polling'], // Start with websocket
+      upgrade: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity
     });
 
     socket.on('connect', () => setIsConnected(true));
@@ -18,8 +21,10 @@ export const useLogs = (maxLines = 50) => {
 
     // Listen for the specific 'log_update' event
     socket.on('log_update', (payload) => {
+        console.log(payload);
       setLogs((prev) => {
         const newLogs = [...prev, payload.data];
+        console.log(newLogs.slice(-maxLines));
         return newLogs.slice(-maxLines); // Keep only the last X lines
       });
     });

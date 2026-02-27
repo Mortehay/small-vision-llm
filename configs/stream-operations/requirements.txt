@@ -17,6 +17,9 @@ flask-socketio
 flask-cors
 tailer
 requests
+gunicorn
+gevent
+gevent-websocket
 
 # Core AI (CPU-only versions handled separately for size)
 # torch

@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     ffmpeg \
     curl \
+    psmisc \
+    lsof \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -28,5 +30,11 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # Copy everything (including your frontend folder)
 COPY . .
 
-# Start the Flask API
-ENTRYPOINT ["python", "scripts/app.py"]
+# # Start the Flask API
+ENTRYPOINT ["gunicorn", \
+            "--worker-class", "geventwebsocket.gunicorn.workers.GeventWebSocketWorker", \
+            "--workers", "1", \
+            "--bind", "0.0.0.0:5001", \
+            "--reload", \
+            "--reload-engine", "poll", \
+            "scripts.app:app"]

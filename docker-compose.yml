@@ -123,6 +123,7 @@ services:
       - "5173:5173"
     environment:
       - HF_TOKEN=${HF_TOKEN}
+      - PYTHONUNBUFFERED=1
       - CAMERA_URL=${CAMERA_URL}
       - OLLAMA_API_URL=${OLLAMA_API_URL}
     volumes:
@@ -131,5 +132,4 @@ services:
       - ./frontend:/app/frontend
       - ./logs:/app/logs
       - ./images:/app/images
-    entrypoint: ["python", "/app/scripts/app.py"]
 

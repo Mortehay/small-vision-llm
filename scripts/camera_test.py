@@ -102,43 +102,27 @@ def setup_dirs():
         logger.info(f"Log directory preserved: {LOG_DIR}")
 
 def save_and_clean_frame(frame, saved_count):
-    """Saves a new frame and strictly ensures only the 10 most recent images exist."""
     try:
-        # 1. Ensure absolute path and directory existence
-        if not os.path.exists(IMAGE_DIR):
-            os.makedirs(IMAGE_DIR, exist_ok=True)
-
-        # 2. Re-scan the directory IMMEDIATELY before saving
-        # We use modification time (mtime) which is more reliable than creation time (ctime)
+        # Re-scan to see current actual files
         files = [os.path.join(IMAGE_DIR, f) for f in os.listdir(IMAGE_DIR) if f.endswith('.jpg')]
-        files.sort(key=os.path.getmtime) # Oldest at index 0
-        
-        # 3. Aggressive Cleanup: If we have 10 or more, remove oldest until we have 9
-        # This makes room for the one we are about to save
-        if len(files) >= 10:
-            to_delete = files[:(len(files) - 9)] # Slice all but the 9 newest
-            for oldest_file in to_delete:
-                try:
-                    os.remove(oldest_file)
-                    logger.info(f"Cleanup: Removed oldest frame {os.path.basename(oldest_file)}")
-                except Exception as delete_err:
-                    logger.error(f"Failed to delete {oldest_file}: {delete_err}")
+        files.sort(key=os.path.getmtime)
 
-        # 4. Save the new 10th frame
+        # Strictly keep only 9 oldest so we can add the 10th
+        if len(files) >= 10:
+            for i in range(len(files) - 9):
+                os.remove(files[i])
+
+        # Save the new 10th image
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"frame_{saved_count:04d}_{timestamp}.jpg"
-        filepath = os.path.join(IMAGE_DIR, filename)
+        # Tip: Use a modulo on saved_count to keep names repeating 0-9 if you prefer
+        filename = f"frame_{saved_count % 10:01d}_{timestamp}.jpg" 
+        cv2.imwrite(os.path.join(IMAGE_DIR, filename), frame)
         
-        cv2.imwrite(filepath, frame)
-        
-        # Update global state
-        state["current_frame"] = frame
-        state["new_frame_available"] = True
-        
-        logger.info(f"Saved AI Snapshot: {filename}")
+        # Flush stdout so the log reader sees it immediately
+        sys.stdout.flush() 
         return True
     except Exception as e:
-        logger.error(f"Failed to save/clean frame: {e}")
+        print(f"Cleanup Error: {e}")
         return False
 
 def run_analysis_loop():
@@ -156,6 +140,7 @@ def run_analysis_loop():
     actual_res = "640x480" 
     out_stream_cmd = [
         'ffmpeg', '-y',
+        '-loglevel', 'error', # <-- to stop FFmpeg from spamming logs
         '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-pix_fmt', 'bgr24', '-s', actual_res, '-r', '30', 
         '-i', '-',  # Read from stdin pipe
@@ -176,7 +161,7 @@ def run_analysis_loop():
         logger.info(f"Starting while loop")
         while state["running"]:
             ret, frame = cap.read()
-            logger.info(f"Frame received {ret}")
+            #logger.info(f"Frame received {ret}")
             if not ret:
                 logger.warning("Empty frame received. Waiting...")
                 time.sleep(1)
@@ -185,15 +170,18 @@ def run_analysis_loop():
             # --- 3. PUSH TO OUTPUT STREAM ---
             # We send every frame to the output stream for smooth playback
             try:
-                logger.info(f"Pushing frame to output stream {out_pipe.stdin}")
+                #this log spams all file
+                #logger.info(f"Pushing frame to output stream {out_pipe.stdin}")
                 out_pipe.stdin.write(frame.tobytes())
             except Exception as pipe_err:
                 logger.error(f"Pipe error: {pipe_err}")
 
             # --- 4. SAMPLING FOR AI ---
             if frame_count % 30 == 0:
-                logger.info(f"Sampling frame {frame_count}")
+                
                 if save_and_clean_frame(frame, saved_count):
+                    logger.info(f"Saved AI Snapshot: frame {saved_count}")
+                    sys.stdout.flush()
                     saved_count += 1
 
             frame_count += 1
