@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStreamControl } from '../hooks/useStream';
 import { useLogs } from '../hooks/useLogs';
 import { useLatestFrame } from '../hooks/useLatestFrame';
@@ -11,10 +11,23 @@ const API_URL_FALLBACK = API_URL + "/latest-frame-fallback";
 
 export default function Dashboard() {
     const [isOnline, setIsOnline] = useState(false);
-    const { logs, isConnected } = useLogs(100);
+    const { logs, isConnected, isSystemActive } = useLogs(100);
     const { startStream, stopStream, loading } = useStreamControl();
-    const latestFrame = useLatestFrame();
+    const { frameUrl, isCapturing, lastCaptureTime } = useLatestFrame();
     const { clearHistory, isClearing } = useHistory();
+
+    // 1. Initial & Periodic Status Check
+
+
+    //2. Sync isOnline with active log signals
+    useEffect(() => {
+        // 1. Create a timer variable
+        if (isSystemActive || isCapturing || frameUrl || lastCaptureTime) {
+            setIsOnline(true);
+        } else {
+            setIsOnline(false);
+        }
+    }, [isSystemActive, isCapturing, frameUrl, lastCaptureTime]);
 
 
     const handleToggle = async () => {
@@ -38,9 +51,17 @@ export default function Dashboard() {
                 <div className="flex flex-col gap-6">
                     {/* First Row: System Toggler */}
                     <div className="flex items-center justify-between bg-slate-800/50 p-4 rounded-xl border border-slate-700">
-                        <span className={`font-bold ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
-                            {isOnline ? 'SYSTEM LIVE' : 'SYSTEM OFFLINE'}
-                        </span>
+                        <div className="flex flex-col">
+                            <span className={`font-bold ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                                {isOnline ? 'SYSTEM LIVE' : 'SYSTEM OFFLINE'}
+                            </span>
+                            {isCapturing && (
+                                <span className="text-[10px] text-emerald-500/80 animate-pulse flex items-center gap-1">
+                                    <span className="h-1.5 w-1.5 bg-emerald-500 rounded-full"></span>
+                                    CAPTURING DATA
+                                </span>
+                            )}
+                        </div>
 
                         <button
                             onClick={handleToggle}
@@ -81,9 +102,9 @@ export default function Dashboard() {
             <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Stream Window (2/3 width) */}
                 <div className="lg:col-span-2 space-y-4">
-                    <div className="bg-black rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
+                    <div className="bg-black rounded-2xl overflow-hidden border border-slate-700 shadow-2xl relative">
                         <img
-                            src={latestFrame}
+                            src={frameUrl}
                             className="w-full aspect-video object-cover"
                             alt="AI Processing Stream"
                             onError={(e) => {
@@ -91,6 +112,11 @@ export default function Dashboard() {
                                 e.target.src = API_URL_FALLBACK;
                             }}
                         />
+                        {lastCaptureTime && (
+                            <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[10px] font-mono text-slate-300">
+                                LAST SNAPSHOT: {lastCaptureTime.toLocaleTimeString()}
+                            </div>
+                        )}
                     </div>
                 </div>
 

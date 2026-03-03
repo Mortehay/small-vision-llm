@@ -220,8 +220,19 @@ def system_stop():
 
 @app.route('/system/status')
 def system_status():
+    global worker_process
+    worker_alive = False
+    if worker_process is not None:
+        # poll() returns None if process is still running
+        worker_alive = worker_process.poll() is None
+    
     timestamp = datetime.now().strftime("%Y.%m.%d %H:%M:%S")
-    return {"status": "ok", "message": "Backend is reachable", "timestamp": timestamp}
+    return {
+        "status": "ok", 
+        "worker_alive": worker_alive,
+        "message": "AI Worker is active" if worker_alive else "AI Worker is stopped", 
+        "timestamp": timestamp
+    }
 
 # Start the log reader thread when the app starts
 
