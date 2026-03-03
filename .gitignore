@@ -13,3 +13,5 @@
 /images/*
 /frontend/node_modules
 /frontend/.env
+/frontend/public/streams/processed/*
+/frontend/public/streams/raw/*

@@ -36,6 +36,22 @@ CAMERA_API = "http://stream-cam:5000"
 # Define the image directory based on camera_test.py config
 IMAGE_DIR = "/data/images/SmolVLM-500M-Instruct-fer0/captured_frames"
 LOG_PATH = "/data/logs/SmolVLM-500M-Instruct-fer0/"
+HLS_BASE_DIR = "/data/logs/HLS_STREAMS"
+
+@app.route('/hls-streams/<path:filename>')
+def serve_hls(filename):
+    """Serve HLS manifest and segments with correct CORS and cache headers."""
+    response = send_from_directory(HLS_BASE_DIR, filename)
+    
+    # Fix MIME types for HLS segments (Flask/Python might guess .ts as TypeScript or Qt)
+    if filename.endswith('.ts'):
+        response.headers['Content-Type'] = 'video/mp2t'
+    elif filename.endswith('.m3u8'):
+        response.headers['Content-Type'] = 'application/vnd.apple.mpegurl'
+
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return response
 
 def signal_handler(sig, frame):
     """Cleanup function triggered on Ctrl+C"""

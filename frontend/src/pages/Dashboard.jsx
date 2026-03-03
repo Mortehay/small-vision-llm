@@ -3,11 +3,18 @@ import { useStreamControl } from '../hooks/useStream';
 import { useLogs } from '../hooks/useLogs';
 import { useLatestFrame } from '../hooks/useLatestFrame';
 import { useHistory } from '../hooks/useHistory';
+import VideoPlayer from '../components/VideoPlayer';
 
 
 const API_URL = import.meta.env.VITE_API_URL;
 const API_URL_FALLBACK = API_URL + "/latest-frame-fallback";
 
+// We serve HLS streams from the frontend dist/streams folder (or proxied)
+// For dev mode, we need to know where the streams are.
+// Since we are running in a container, the frontend is served at :5173
+// and the streams are written to dist/streams.
+const RAW_STREAM_URL = `${API_URL}/hls-streams/raw/live.m3u8`;
+const PROC_STREAM_URL = `${API_URL}/hls-streams/processed/live.m3u8`;
 
 export default function Dashboard() {
     const [isOnline, setIsOnline] = useState(false);
@@ -20,14 +27,14 @@ export default function Dashboard() {
 
 
     //2. Sync isOnline with active log signals
-    useEffect(() => {
-        // 1. Create a timer variable
-        if (isSystemActive || isCapturing || frameUrl || lastCaptureTime) {
-            setIsOnline(true);
-        } else {
-            setIsOnline(false);
-        }
-    }, [isSystemActive, isCapturing, frameUrl, lastCaptureTime]);
+    // useEffect(() => {
+    //     // 1. Create a timer variable
+    //     if (isSystemActive || isCapturing || frameUrl || lastCaptureTime) {
+    //         setIsOnline(true);
+    //     } else {
+    //         setIsOnline(false);
+    //     }
+    // }, [isSystemActive, isCapturing, frameUrl, lastCaptureTime]);
 
 
     const handleToggle = async () => {
@@ -102,7 +109,7 @@ export default function Dashboard() {
             <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Stream Window (2/3 width) */}
                 <div className="lg:col-span-2 space-y-4">
-                    <div className="bg-black rounded-2xl overflow-hidden border border-slate-700 shadow-2xl relative">
+                    <div className={`bg-black rounded-2xl overflow-hidden border border-slate-700 shadow-2xl relative ${!isOnline ? 'blur-2xl scale-110' : 'blur-0 scale-100'}`}>
                         <img
                             src={frameUrl}
                             className="w-full aspect-video object-cover"
@@ -114,9 +121,15 @@ export default function Dashboard() {
                         />
                         {lastCaptureTime && (
                             <div className="absolute bottom-4 left-4 bg-black/60 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 text-[10px] font-mono text-slate-300">
-                                LAST SNAPSHOT: {lastCaptureTime.toLocaleTimeString()}
+                                LAST AI SNAPSHOT: {lastCaptureTime.toLocaleTimeString()}
                             </div>
                         )}
+                    </div>
+
+                    {/* TWO NEW STREAM WINDOWS */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <VideoPlayer isOnline={isOnline} url={RAW_STREAM_URL} title="Camera Raw Stream (55080)" />
+                        <VideoPlayer isOnline={isOnline} url={PROC_STREAM_URL} title="AI Processed Stream (55081)" />
                     </div>
                 </div>
 

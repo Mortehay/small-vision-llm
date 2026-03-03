@@ -20,7 +20,10 @@ OUTPUT_URL = "udp://172.17.0.1:55081?pkt_size=1316"
 API_URL = "http://ollama-llm:11434/api/chat"
 MODEL_ID = f"hf.co/JoseferEins/{LLM_NAME}:latest"
 IMAGE_DIR = f"/data/images/{LLM_NAME}/captured_frames"
-LOG_DIR = f"/data/logs/{LLM_NAME}" # FIX 2: Ensure LOG_DIR is defined
+LOG_DIR = f"/data/logs/{LLM_NAME}"
+STREAM_DIR = "/data/logs/HLS_STREAMS"
+RAW_STREAM_DIR = os.path.join(STREAM_DIR, "raw")
+PROC_STREAM_DIR = os.path.join(STREAM_DIR, "processed")
 
 # --- LOGGING SETUP ---
 # --- camera_test.py ---
@@ -88,20 +91,20 @@ state = {
 def setup_dirs():
     """Clears existing images but keeps logs to preserve startup history."""
     # 1. Clear Images: Completely wipe and recreate the image directory
-    if os.path.exists(IMAGE_DIR):
-        try:
-            shutil.rmtree(IMAGE_DIR)
-            logger.info(f"Cleared image directory: {IMAGE_DIR}")
-        except Exception as e:
-            logger.error(f"Failed to clear images: {e}")
     os.makedirs(IMAGE_DIR, exist_ok=True)
     
-    # 2. Preserve Logs: We only ensure the directory exists.
-    # We remove the code that was unlinking files in LOG_DIR.
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR, exist_ok=True)
-    else:
-        logger.info(f"Log directory preserved: {LOG_DIR}")
+    # 2. Setup Stream Dirs
+    for d in [RAW_STREAM_DIR, PROC_STREAM_DIR]:
+        if os.path.exists(d):
+            shutil.rmtree(d)
+        os.makedirs(d, exist_ok=True)
+        # Ensure web server can read (dist/ might be owned by root in container)
+        try:
+            os.chmod(d, 0o755)
+        except:
+            pass
+
+    # 3. Preserve Logs...
 
 def save_and_clean_frame(frame, saved_count):
     try:
@@ -155,31 +158,42 @@ def run_analysis_loop():
     
 
 
-    # --- 2. SETUP OUTPUT STREAM (FFMPEG PIPE) ---
-    # resolution must match the input (640x480)
-    actual_res = "640x480" 
-    out_stream_cmd = [
-        'ffmpeg', '-y',
-        '-loglevel', 'error',
+    # --- 2. SETUP HLS OUTPUT STREAMS ---
+    def start_hls_pipe(output_path, input_url=None):
+        cmd = [
+            'ffmpeg', '-y', '-loglevel', 'error',
+        ]
+        if input_url:
+            cmd += ['-i', input_url]
+        else:
+            cmd += [
+                '-f', 'rawvideo', '-vcodec', 'rawvideo',
+                '-pix_fmt', 'bgr24', '-s', '640x480', '-r', '30', '-i', '-'
+            ]
+            
+        cmd += [
+            '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency',
+            '-g', '30', '-hls_time', '2', '-hls_list_size', '3', '-hls_flags', 'delete_segments',
+            '-f', 'hls', os.path.join(output_path, "live.m3u8")
+        ]
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE if not input_url else None)
+
+    # Raw stream pipe
+    raw_hls = start_hls_pipe(RAW_STREAM_DIR)
+    # Processed stream from Pipe
+    proc_hls = start_hls_pipe(PROC_STREAM_DIR)
+    
+    # Keeping old UDP output for compatibility if still needed
+    udp_out_cmd = [
+        'ffmpeg', '-y', '-loglevel', 'error',
         '-f', 'rawvideo', '-vcodec', 'rawvideo',
         '-pix_fmt', 'bgr24', '-s', '640x480', '-r', '30', 
         '-i', '-', 
-        '-c:v', 'libx264', 
-        '-pix_fmt', 'yuv420p',
-        '-preset', 'ultrafast', 
-        '-tune', 'zerolatency',
-        '-g', '30',                         # Force keyframe every 30 frames
-        '-bsf:v', 'dump_extra',             # Extract and insert SPS/PPS from extradata
-        '-flags', '+global_header',         # Ensure headers are present
-        '-f', 'mpegts', OUTPUT_URL
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+        '-preset', 'ultrafast', '-tune', 'zerolatency',
+        '-g', '30', '-f', 'mpegts', OUTPUT_URL
     ]
-    
-    # Start the output process
-    out_pipe = subprocess.Popen(
-        out_stream_cmd, 
-        stdin=subprocess.PIPE,
-        bufsize=10**7  # ~10MB buffer to prevent blocking
-    )
+    udp_out_pipe = subprocess.Popen(udp_out_cmd, stdin=subprocess.PIPE, bufsize=10**7)
     
     frame_count = 0
     saved_count = 0
@@ -196,12 +210,12 @@ def run_analysis_loop():
                 time.sleep(1)
                 continue
 
-            # --- 3. PUSH TO OUTPUT STREAM ---
-            # We send every frame to the output stream for smooth playback
+            # --- 3. PUSH TO OUTPUT STREAMS ---
             try:
-                #this log spams all file
-                #logger.info(f"Pushing frame to output stream {out_pipe.stdin}")
-                out_pipe.stdin.write(frame.tobytes())
+                frame_bytes = frame.tobytes()
+                udp_out_pipe.stdin.write(frame_bytes)
+                raw_hls.stdin.write(frame_bytes)
+                proc_hls.stdin.write(frame_bytes)
             except Exception as pipe_err:
                 logger.error(f"Pipe error: {pipe_err}")
 
@@ -219,13 +233,14 @@ def run_analysis_loop():
         logger.error(f"Error in analysis loop: {e}")
     finally:
         cap.release()
-        if out_pipe.stdin:
-            out_pipe.stdin.close()
-        out_pipe.terminate()
-        try:
-            out_pipe.wait(timeout=0.5) # Give it a moment to exit cleanly
-        except subprocess.TimeoutExpired:
-            out_pipe.kill() # Force kill if it doesn't close
+        for p in [udp_out_pipe, proc_hls, raw_hls]:
+            if p.stdin:
+                p.stdin.close()
+            p.terminate()
+            try:
+                p.wait(timeout=0.5)
+            except subprocess.TimeoutExpired:
+                p.kill()
         logger.info("Stream connections closed.")
 
 if __name__ == "__main__":

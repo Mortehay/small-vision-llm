@@ -6,6 +6,9 @@ export default defineConfig({
   server: {
     host: true, // Allows access from outside the container
     port: 5173,
+    watch: {
+      ignored: ['**/public/streams/**'],
+    },
     // Proxy removed: We will use the .env variable in our code instead
   },
 });
