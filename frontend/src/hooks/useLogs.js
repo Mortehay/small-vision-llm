@@ -21,10 +21,10 @@ export const useLogs = (maxLines = 50) => {
 
     // Listen for the specific 'log_update' event
     socket.on('log_update', (payload) => {
-        console.log(payload);
+
       setLogs((prev) => {
         const newLogs = [...prev, payload.data];
-        console.log(newLogs.slice(-maxLines));
+
         return newLogs.slice(-maxLines); // Keep only the last X lines
       });
     });

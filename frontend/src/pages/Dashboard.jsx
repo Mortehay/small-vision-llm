@@ -4,7 +4,10 @@ import { useLogs } from '../hooks/useLogs';
 import { useLatestFrame } from '../hooks/useLatestFrame';
 import { useHistory } from '../hooks/useHistory';
 
+
 const API_URL = import.meta.env.VITE_API_URL;
+const API_URL_FALLBACK = API_URL + "/latest-frame-fallback";
+
 
 export default function Dashboard() {
     const [isOnline, setIsOnline] = useState(false);
@@ -12,6 +15,7 @@ export default function Dashboard() {
     const { startStream, stopStream, loading } = useStreamControl();
     const latestFrame = useLatestFrame();
     const { clearHistory, isClearing } = useHistory();
+
 
     const handleToggle = async () => {
         if (isOnline) {
@@ -84,7 +88,7 @@ export default function Dashboard() {
                             alt="AI Processing Stream"
                             onError={(e) => {
                                 // If the image fails to load, we show a placeholder
-                                e.target.src = "https://via.placeholder.com/1280x720?text=Waiting+for+AI+Frame...";
+                                e.target.src = API_URL_FALLBACK;
                             }}
                         />
                     </div>

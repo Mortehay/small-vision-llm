@@ -1,3 +1,6 @@
+from gevent import monkey
+monkey.patch_all()
+
 from flask import Flask, jsonify, send_from_directory, send_file
 from flask_socketio import SocketIO
 from flask_cors import CORS
@@ -31,8 +34,8 @@ socketio = SocketIO(
 worker_process = None
 CAMERA_API = "http://stream-cam:5000"
 # Define the image directory based on camera_test.py config
-IMAGE_DIR = "/app/images/SmolVLM-500M-Instruct-fer0/captured_frames"
-LOG_PATH = "/app/logs/SmolVLM-500M-Instruct-fer0/"
+IMAGE_DIR = "/data/images/SmolVLM-500M-Instruct-fer0/captured_frames"
+LOG_PATH = "/data/logs/SmolVLM-500M-Instruct-fer0/"
 
 def signal_handler(sig, frame):
     """Cleanup function triggered on Ctrl+C"""
@@ -40,10 +43,13 @@ def signal_handler(sig, frame):
     global worker_process
     
     # 1. Terminate the AI worker
-    if worker_process and worker_process.is_alive():
+    if worker_process and worker_process.poll() is None:
         print("[SYSTEM] Terminating AI Worker...")
         worker_process.terminate()
-        worker_process.join()
+        try:
+            worker_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            worker_process.kill()
         
     # 2. Try to stop the remote camera if it's running
     try:
@@ -106,6 +112,21 @@ def get_latest_frame():
     _, buffer = cv2.imencode('.jpg', img)
     return send_file(io.BytesIO(buffer), mimetype='image/jpeg')
 
+@app.route('/latest-frame-fallback')
+def get_latest_frame_fallback():
+    # 1. Fallback: Generate a local placeholder if no image exists
+    # Create a 1280x720 dark gray image
+    img = np.zeros((720, 1280, 3), dtype=np.uint8)
+    img[:] = (30, 30, 35) # Slate-ish background
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    text = f"Awaiting Frame... {timestamp}"
+    cv2.putText(img, text, (400, 360), font, 1.5, (100, 100, 110), 3, cv2.LINE_AA)
+    
+    # Encode to memory and send
+    _, buffer = cv2.imencode('.jpg', img)
+    return send_file(io.BytesIO(buffer), mimetype='image/jpeg')
+
 def log_reader_thread():
     """Background thread to emit logs via WebSocket without blocking."""
     current_file = None
@@ -115,6 +136,7 @@ def log_reader_thread():
         try:
             # 1. Always look for the newest log file
             log_files = [os.path.join(LOG_PATH, f) for f in os.listdir(LOG_PATH) if f.endswith('.log')]
+
             if not log_files:
                 time.sleep(1)
                 continue
@@ -144,34 +166,48 @@ def log_reader_thread():
 def system_start():
     global worker_process
     
-  
-
-    # 2. Trigger the Hardware Camera (The 'Sending' side)
-    try:
-        requests.post("http://stream-cam:5000/start", timeout=5)
-
-        time.sleep(5)
-
-        # 1. Start AI Receiver (The 'Listening' side)
-        if worker_process is None or not worker_process.is_alive():
-            worker_process = multiprocessing.Process(target=run_analysis_loop)
-            worker_process.start()
-            
-        # Give the AI script 1 second to open its UDP port
+    # 1. Start AI Receiver as a standalone subprocess to avoid gevent/multiprocessing clash
+    # Check if process is already running
+    if worker_process is None or worker_process.poll() is not None:
+        cmd = [sys.executable, "/app/scripts/camera_test.py"]
+        print(f"[SYSTEM] Starting AI Worker with: {' '.join(cmd)}")
+        try:
+            worker_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=os.environ.copy(),
+                start_new_session=True # Help avoid signal propagation if needed
+            )
+            print(f"[SYSTEM] AI Worker started with PID: {worker_process.pid}")
+        except Exception as e:
+            print(f"[SYSTEM] Failed to start AI Worker: {e}")
+            return jsonify({"error": f"Failed to start AI Worker: {str(e)}"}), 500
     
-    except Exception as e:
-        return jsonify({"error": f"Camera failed: {e}"}), 500
-
-    return jsonify({"status": "System Online"}), 200
+    # 2. Robust Camera Trigger (with retries)
+    max_retries = 5
+    for i in range(max_retries):
+        try:
+            requests.post(f"{CAMERA_API}/start", timeout=5)
+            return jsonify({"status": "System Online"}), 200
+        except requests.exceptions.ConnectionError:
+            if i < max_retries - 1:
+                time.sleep(2) # Wait for camera container to finish booting
+                continue
+            return jsonify({"error": "Camera service not reachable"}), 500
 
 @app.route('/system/stop', methods=['POST'])
 def system_stop():
     global worker_process
     
     # 1. Stop local AI processing
-    if worker_process and worker_process.is_alive():
+    if worker_process and worker_process.poll() is None:
+        print("[SYSTEM] Stopping AI Worker...")
         worker_process.terminate()
-        worker_process.join()
+        try:
+            worker_process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            worker_process.kill()
         worker_process = None
         
     # 2. Stop Remote Hardware

@@ -13,14 +13,16 @@ UDP_DEST = "udp://stream_operations:55080?pkt_size=1316"
 FFMPEG_CMD = [
     "ffmpeg", "-hide_banner", 
     "-f", "v4l2", 
-    "-input_format", "yuyv422",  # Explicitly set based on your manual test success
+    "-input_format", "yuyv422", 
     "-video_size", "640x480", 
     "-i", "/dev/video0",
     "-c:v", "libx264", 
     "-preset", "ultrafast", 
     "-tune", "zerolatency",
-    "-g", "30", 
+    "-g", "15",                     # Lower GOP size (Keyframe every 15 frames)
+    "-x264-params", "keyint=15:min-keyint=15:scenecut=0", # Force consistent keyframes
     "-flags", "+global_header", 
+    "-bsf:v", "dump_extra",         # Extracts and inserts extra data (SPS/PPS)
     "-pix_fmt", "yuv420p", 
     "-f", "mpegts", 
     UDP_DEST

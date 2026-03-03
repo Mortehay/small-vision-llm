@@ -80,9 +80,11 @@ services:
   stream-cam:
     container_name: stream-cam
     # Use an image with python and ffmpeg, or build your own
-    image: python:3.12-slim
+    build:
+      context: .
+      dockerfile: ./configs/stream-cam/Dockerfile
+    privileged: true
     user: root
-    privileged: true 
     networks:
       - local-ai-net
       - shared-ai-network
@@ -130,6 +132,6 @@ services:
       - /dev:/dev
       - ./scripts:/app/scripts
       - ./frontend:/app/frontend
-      - ./logs:/app/logs
-      - ./images:/app/images
+      - ./logs:/data/logs
+      - /images:/data/images
 
