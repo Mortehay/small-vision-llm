@@ -14,29 +14,30 @@ import socket
 import signal
 
 # --- CONFIGURATION ---
-LLM_NAME = "SmolVLM-500M-Instruct-fer0"
-INPUT_URL = "udp://0.0.0.0:55080?pkt_size=1316"
+STREAM_NAME = os.environ.get("STREAM_NAME", "default")
+LLM_NAME = "SmolVLM-500M-Instruct-fer0" # Keeping model name but prefixing paths with stream name
+INPUT_URL = "udp://0.0.0.0:55080"
 OUTPUT_URL = "udp://172.17.0.1:55081?pkt_size=1316"
 API_URL = "http://ollama-llm:11434/api/chat"
 MODEL_ID = f"hf.co/JoseferEins/{LLM_NAME}:latest"
-IMAGE_DIR = f"/data/images/{LLM_NAME}/captured_frames"
-LOG_DIR = f"/data/logs/{LLM_NAME}"
+
+# Unique paths per stream
+IMAGE_DIR = f"/data/images/{STREAM_NAME}/captured_frames"
+LOG_DIR = f"/data/logs/{STREAM_NAME}"
 STREAM_DIR = "/data/logs/HLS_STREAMS"
 RAW_STREAM_DIR = os.path.join(STREAM_DIR, "raw")
 PROC_STREAM_DIR = os.path.join(STREAM_DIR, "processed")
 
 # --- LOGGING SETUP ---
-# --- camera_test.py ---
 
 def get_logger():
     # Use an absolute path for reliability
-    abs_log_dir = "/data/logs/SmolVLM-500M-Instruct-fer0"
-    os.makedirs(abs_log_dir, exist_ok=True)
+    os.makedirs(LOG_DIR, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d") # Group by day
-    log_filename = os.path.join(abs_log_dir, f"ai_debug_{timestamp}.log")
+    log_filename = os.path.join(LOG_DIR, f"ai_debug_{timestamp}.log")
 
-    logger = logging.getLogger("AI_Worker")
+    logger = logging.getLogger(f"AI_Worker_{STREAM_NAME}")
     logger.setLevel(logging.INFO)
     
     # Clear existing handlers to prevent duplicate logs
@@ -62,6 +63,7 @@ def get_logger():
 
 # Initialize logger
 logger = get_logger()
+
 
 def test_udp_network(url, timeout=5):
     try:
@@ -133,28 +135,43 @@ def save_and_clean_frame(frame, saved_count):
 def run_analysis_loop():
     global state
     setup_dirs()
-    logger.info(f"run_analysis_loop started. Using INPUT_URL: {INPUT_URL}")
+    # Standard LISTEN_URL for OpenCV inside Docker
+    LISTEN_URL = "udp://0.0.0.0:55080"
+    logger.info(f"run_analysis_loop starting. Listening on: {LISTEN_URL}")
+    
+    # Increase probing to ensure H.264/MJPEG recognition
     os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "probesize;5000000|analyzeduration;5000000"
     
-    # --- 1. SETUP INPUT ---
-    logger.info("Opening VideoCapture...")
-    cap = cv2.VideoCapture(INPUT_URL, cv2.CAP_FFMPEG)
+    # --- 1. SETUP INPUT WITH RETRIES ---
+    logger.info("Opening VideoCapture (with retries)...")
+    cap = None
+    max_init_retries = 30 # Even more retries
+    for attempt in range(max_init_retries):
+        cap = cv2.VideoCapture(LISTEN_URL, cv2.CAP_FFMPEG)
+        if cap.isOpened():
+            logger.info(f"VideoCapture opened successfully on attempt {attempt + 1}.")
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            break
+        
+        logger.warning(f"Attempt {attempt + 1}: Could not open stream. Waiting for FFmpeg...")
+        if cap: cap.release()
+        time.sleep(3)
     
-    if not cap.isOpened():
-        logger.error(f"Could not open video stream: {INPUT_URL}. Check if FFmpeg is sending data.")
+    if cap is None or not cap.isOpened():
+        logger.error(f"FATAL: Could not open stream {LISTEN_URL} after {max_init_retries} attempts.")
         return
-    logger.info("VideoCapture opened successfully.")
 
-    # 2. DISCARD initial "broken" frames until we hit a Keyframe
-    logger.info("Syncing with camera stream (reading first few frames)...")
-    for i in range(30): # Try for up to 30 frames
-        logger.info(f"Attempting to read sync frame {i}...")
+    # 2. SYNC WITH STREAM (Discard early broken frames)
+    logger.info("Syncing with stream...")
+    # Read up to 200 frames to find a valid keyframe from the webcam
+    for i in range(200): 
         ret, frame = cap.read()
         if ret and frame is not None:
-            logger.info(f"Sync successful on frame {i}!")
+            logger.info(f"Stream sync successful on frame {i}!")
             break
-        logger.warning(f"Failed to read sync frame {i}")
-        time.sleep(0.5)
+        if i % 20 == 0:
+            logger.warning(f"Searching for valid frames... (attempt {i})")
+        time.sleep(0.01)
     
 
 

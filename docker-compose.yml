@@ -29,7 +29,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 8G  # Adjust based on your physical RAM
+          memory: 8G # Adjust based on your physical RAM
         reservations:
           memory: 4G
 
@@ -50,8 +50,7 @@ services:
       - HF_TOKEN=${HF_TOKEN}
     entrypoint: /bin/sh
     command: >
-      -c "sleep 10;
-      for model in ${LLM_LIST}; do
+      -c "sleep 10; for model in ${LLM_LIST}; do
         if ! ollama list | grep -q \"$$model\"; then
           echo \"Model $$model not found, pulling...\";
           ollama pull $$model;
@@ -63,7 +62,6 @@ services:
       - ollama-llm
     restart: on-failure
 
-  
   # --- Web Interface ---
   open-webui-llm:
     image: ghcr.io/open-webui/open-webui:main
@@ -75,7 +73,7 @@ services:
     volumes:
       - ./webui_data:/app/backend/data
     restart: unless-stopped
-    
+
   # --- Camera Streamer ---
   stream-cam:
     container_name: stream-cam
@@ -112,7 +110,7 @@ services:
   stream-operations:
     build:
       context: .
-      dockerfile: ./configs/stream-operations/Dockerfile 
+      dockerfile: ./configs/stream-operations/Dockerfile
     container_name: stream_operations
     user: root
     extra_hosts:
@@ -128,10 +126,11 @@ services:
       - PYTHONUNBUFFERED=1
       - CAMERA_URL=${CAMERA_URL}
       - OLLAMA_API_URL=${OLLAMA_API_URL}
+      - WEB_USER=${WEB_USER}
+      - WEB_PASS=${WEB_PASS}
     volumes:
       - /dev:/dev
       - ./scripts:/app/scripts
       - ./frontend:/app/frontend
       - ./logs:/data/logs
       - /images:/data/images
-
